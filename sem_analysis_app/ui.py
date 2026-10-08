@@ -487,6 +487,11 @@ def create_interface():
                 with gr.Row():
                     export_btn = gr.Button("📥 Export all results", variant="primary")
                     export_file = gr.File(label="Download")
+                # What Export did, or why it could not: it has nothing to hand
+                # over before the first frame is saved, and an empty download
+                # box says nothing about that.
+                export_status = gr.Textbox(label="", interactive=False,
+                                           show_label=False)
 
             # ============================================================
             # TAB 5: Plots

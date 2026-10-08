@@ -1,50 +1,22 @@
 @echo off
-REM Quick launcher for SEM Particle Analysis Gradio App
-REM This script activates the conda environment and runs the application
+REM Launch the analysis app. Double-click it, or run it from a terminal; any
+REM arguments are passed on (for example --port 7861).
 
-REM Set console to UTF-8 to handle emoji and special characters
 chcp 65001 > nul 2>&1
-
 REM Run from the repo root whatever directory this was launched from, so
 REM "python -m sem_analysis_app" can find the package.
 cd /d "%~dp0"
 
-echo ========================================
-echo  SEM Particle Analysis - Gradio App
-echo ========================================
-echo.
-
-REM The environment to use. SEM_analysis is what the README describes; cnt-imaging
-REM is the one actually built on this machine, with torch+CUDA for the RTX 5080,
-REM easyocr and gradio. Whichever exists is used, preferring SEM_analysis.
-set CONDA_ROOT=C:\Users\sanja\anaconda3
-set SEM_ENV=SEM_analysis
-if not exist "%CONDA_ROOT%\envs\%SEM_ENV%" set SEM_ENV=cnt-imaging
-
-if not exist "%CONDA_ROOT%\envs\%SEM_ENV%" (
-    echo ERROR: no usable conda environment found under %CONDA_ROOT%\envs
-    echo Create one, or edit SEM_ENV at the top of this script.
+call "%~dp0scripts\activate_env.bat"
+if errorlevel 1 (
     pause
     exit /b 1
 )
 
-echo Activating %SEM_ENV% environment...
-call "%CONDA_ROOT%\Scripts\activate.bat" %SEM_ENV%
-
 echo.
-echo Starting Gradio application...
-echo The app will open at: http://127.0.0.1:7860
+echo Starting the analysis app at http://127.0.0.1:7860
+echo Press Ctrl+C to stop it.
 echo.
-echo Press Ctrl+C to stop the server
-echo ========================================
-echo.
-
-REM Set Python to use UTF-8 encoding
-set PYTHONIOENCODING=utf-8
-
-REM Fix OpenMP library conflict (Intel MKL + PyTorch)
-set KMP_DUPLICATE_LIB_OK=TRUE
-
-python -m sem_analysis_app
+python -m sem_analysis_app %*
 
 pause

@@ -10,51 +10,64 @@ This toolkit provides both a **Python package** for programmatic access and a **
 
 ### 1. Setup Environment
 
+You need [Miniconda or Anaconda](https://docs.conda.io/en/latest/miniconda.html)
+and [Git](https://git-scm.com/downloads) — the SAM package installs straight from
+its GitHub repository.
+
 ```bash
-# Create conda environment
+git clone https://github.com/SanjayPradeep97/SAM-SEM-Segmentation.git
+cd SAM-SEM-Segmentation
+
 conda create -n SEM_analysis python=3.11
 conda activate SEM_analysis
+```
 
-# Install PyTorch (choose based on your system)
-# For RTX 5080 (Blackwell architecture):
-pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
+Install PyTorch **before** the package. EasyOCR depends on it, and if it is not
+already there pip fetches the default build — which on Windows is CPU-only, and
+SAM then runs ten times slower without any error to say why.
 
-# For RTX 30/40 series:
-conda install pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia
+```bash
+# NVIDIA GPU (RTX 20, 30, 40 and 50 series, with a current driver):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
-# For Apple Silicon (M1/M2/M3/M4):
-conda install pytorch torchvision -c pytorch
+# Apple Silicon, or no GPU:
+pip install torch torchvision
+```
 
-# For CPU only:
-conda install pytorch torchvision cpuonly -c pytorch
+Then the package and everything else:
 
-# Install the package and all dependencies
+```bash
 pip install -e .
 ```
 
 ### 2. Download SAM Weights
 
 ```bash
-# Download ViT-H (best quality, 2.4GB)
 python download_sam_weights.py
-
-# Weights will be saved to: sam_weights/
 ```
 
-### 3. Run the Web Application
+Choose **3 (ViT-B, 358 MB)** unless you have a reason not to: both apps load it
+by default, and it is fast enough to use interactively on a laptop. ViT-H (2.4 GB)
+segments slightly better and is picked from the dropdown when present. Weights go
+to `sam_weights/`.
 
-**Windows:**
-```bash
-run_app.bat
-```
+### 3. Run the Apps
 
-**macOS/Linux:**
-```bash
-python -m sem_analysis_app
-```
+There are two, for two stages of the work:
 
-Open your browser to `http://127.0.0.1:7860`. Use `--port` / `--host` to change
-where it listens.
+| App | For | Windows | Any platform | Opens at |
+| --- | --- | --- | --- | --- |
+| Analysis | Segmenting images one at a time, from scratch | `run_app.bat` | `python -m sem_analysis_app` | http://127.0.0.1:7860 |
+| Review | Correcting and signing off a folder a batch run pre-analysed | `run_review_app.bat` | `python -m sem_review_app` | http://127.0.0.1:7870 |
+
+The `.bat` launchers find conda wherever it is installed and activate
+`SEM_analysis`; set `SEM_ENV` first to use another environment. Either app takes
+`--port` and `--host`; the review app also takes `--folder` to open a folder on
+startup, and moves to the next free port if 7870 is taken.
+
+On Windows, outside the launchers, set `KMP_DUPLICATE_LIB_OK=TRUE` first —
+PyTorch and NumPy each ship an OpenMP runtime and otherwise refuse to share a
+process.
 
 ### 4. Establishing Scale
 
@@ -141,7 +154,41 @@ Note that batch mode uses the automatic pipeline only — no interactive
 refinement — and picks its mask candidate by heuristic. The chosen mask and the
 rejected candidates are recorded in `run.json`.
 
-### 7. Use as Python Package
+### 7. Reviewing a Pre-analysed Folder
+
+Automatic segmentation gets most frames nearly right and a few badly wrong, so
+for counts you intend to publish it is a first draft. The review app opens a
+folder of masks somebody (or something) has already made and gives you the same
+Remove / Add / Merge / Redraw tools to correct them, one frame at a time.
+
+It expects this layout:
+
+```
+C1_analysis/
+├── raw/                    one PNG per frame
+├── mask/                   one black-and-white PNG per frame, same name
+├── overlay/                optional; the thumbnails shown in the Frames tab
+└── analysis_results.csv    optional; each frame's scale (file_name, nm_per_px,
+                            scale_method). Without it, set the scale in the app.
+```
+
+Point it at the folder with **Open folder** or `--folder`. Each frame opens with
+its scale from `analysis_results.csv`, which the 📏 Scale panel lets you check
+against the bar and confirm, or replace by clicking the bar's two ends.
+
+What it writes, beside the originals rather than over them:
+
+| File | Contents |
+| --- | --- |
+| `reviewed_results.csv` | One row per signed-off frame, same columns as the analysis app's results; saving a frame again replaces its row |
+| `mask_reviewed/` | Your corrected mask for every frame you changed |
+| `overlay_reviewed/` | The frame with your corrected mask drawn over it |
+
+Corrections are written when you leave a frame, not only when you save it, so
+closing the app — or losing power — does not lose them. Reopening a frame shows
+your version; **Reload from analysis** puts the original back.
+
+### 8. Use as Python Package
 
 ```python
 from sem_particle_analysis import SAMModel, ParticleAnalyzer
@@ -149,7 +196,7 @@ from sem_particle_analysis import SAMModel, ParticleAnalyzer
 # Your code here
 ```
 
-### 8. Run the Tests
+### 9. Run the Tests
 
 ```bash
 pytest                      # everything
@@ -209,7 +256,14 @@ at a time; two browser tabs pointed at the same server share one session.
 
 See [`sem_analysis_app/README.md`](sem_analysis_app/README.md) for detailed usage instructions.
 
-### 2. **Python Package** (`sem_particle_analysis/`)
+### 2. **Review App** (`sem_review_app/`)
+
+A second interface for the correction pass over a pre-analysed folder — see
+[Reviewing a Pre-analysed Folder](#7-reviewing-a-pre-analysed-folder). It reuses
+the analysis app's refinement tools rather than reimplementing them, so a fix in
+one is a fix in both.
+
+### 3. **Python Package** (`sem_particle_analysis/`)
 
 A clean, modular Python library for programmatic access:
 
