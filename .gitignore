@@ -49,3 +49,6 @@ analysis_results*.csv
 # Gradio cache
 gradio_cached_examples/
 flagged/
+
+# Default output folder of sem-analyze, when run from the repository root.
+/analysis_output/

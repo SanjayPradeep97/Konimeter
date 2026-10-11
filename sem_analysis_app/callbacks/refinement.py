@@ -202,7 +202,7 @@ def handle_image_click(evt: gr.SelectData):
 
                 # Call SAM with all points using iterative refinement
                 if state.point_refine_logits is not None:
-                    # Use previous logits for iterative refinement (like the notebook)
+                    # Feed back the previous logits, as SAM's predictor example does
                     masks_out, scores, logits_out = state.segmenter.sam_model.predictor.predict(
                         point_coords=np.array(state.point_refine_points, dtype=float),
                         point_labels=np.array(state.point_refine_labels, dtype=int),

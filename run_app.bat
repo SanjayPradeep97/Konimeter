@@ -14,8 +14,8 @@ if errorlevel 1 (
 )
 
 echo.
-echo Starting the analysis app at http://127.0.0.1:7860
-echo Press Ctrl+C to stop it.
+echo Starting the analysis app. Open the address it prints below
+echo ^(http://127.0.0.1:7860 unless you passed --port^). Press Ctrl+C to stop it.
 echo.
 python -m sem_analysis_app %*
 

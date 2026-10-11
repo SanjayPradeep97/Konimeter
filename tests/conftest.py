@@ -9,11 +9,11 @@ import pytest
 # Test helpers live alongside the tests rather than in the installed package.
 sys.path.insert(0, str(Path(__file__).parent))
 # The library under test, taken from this checkout rather than from whatever is
-# installed. Both apps import sem_particle_analysis by name, and a development
-# install resolves that name to the directory pip was pointed at — which inside
-# a git worktree is the *other* checkout. Without this the suite silently
-# exercises code that is not the code being changed, and a new argument to a
-# library function comes back as "unexpected keyword argument".
+# installed. Everything here imports sem_particle_analysis by name, and a
+# development install resolves that name to the directory pip was pointed at —
+# which inside a git worktree is the *other* checkout. Without this the suite
+# silently exercises code that is not the code being changed, and a new argument
+# to a library function comes back as "unexpected keyword argument".
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 

@@ -75,7 +75,7 @@ def discover_checkpoints(extra_dirs=None):
     ViT-B is the default rather than ViT-H because of how the app is used. The
     analyst judges and corrects every mask, so the model produces a starting
     point rather than an answer, and ViT-B gets there several times faster from
-    a 375 MB checkpoint instead of a 2.4 GB one. Over a folder of hundreds, the
+    a 358 MB checkpoint instead of a 2.4 GB one. Over a folder of hundreds, the
     wait for the larger encoder costs more than its extra accuracy returns —
     and it is one click away in the same list when a frame deserves it.
 

@@ -14,8 +14,8 @@ data/
 └── figures/             # publication figures
 ```
 
-Keeping one folder per sample matters because the app loads *all* images in a
-folder when you select any image from it.
+Keeping one folder per sample matters because the app opens every image in the
+folder you give it, and keeps one `analysis_results.csv` per folder.
 
 ## Formats
 
