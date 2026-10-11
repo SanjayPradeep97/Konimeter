@@ -5,15 +5,19 @@
  Multi-encoder benchmark for mask-guided CNT morphology classification
 ================================================================================
 
-Answers, in one table:
-  R1 limitation 1  -- microscopy-specific and newer foundation models
-                      (DINOv3, DINOv2+registers, SAM 2.1, I-JEPA)
-  R1 limitation 2  -- one fixed layer-sampling STRATEGY for every encoder,
+Covers, in one table:
+  newer encoders   -- newer foundation models
+                      (DINOv3, DINOv2+registers, SAM 2.1)
+  layer sampling   -- one fixed layer-sampling STRATEGY for every encoder,
                       rather than a layer set tuned for DINOv2
-  R2 issue 1       -- conventional transfer-learning controls
+  controls         -- conventional transfer-learning controls
                       (ResNet-50, supervised ViT-B/16, ConvNeXt-V2)
-  R2 issue 3       -- selection on CV, held-out test reported once, with
+  protocol         -- selection on CV, held-out test reported once, with
                       Wilson confidence intervals
+
+Also defined, but NOT part of the reported benchmark: micro-SAM (`usam_b`,
+microscopy-specific; needs USAM_CHECKPOINT) and I-JEPA (`ijepa_h14`, ViT-H
+only, so not capacity-matched). Run them explicitly with --encoders.
 
 THE POINT OF THIS SCRIPT
 ------------------------
@@ -45,7 +49,7 @@ USAGE
 -----
   python encoder_bench.py --list
   python encoder_bench.py --encoders dinov2_b14 dinov3_b16 resnet50
-  python encoder_bench.py --group reviewers      # exactly what R1 and R2 asked
+  python encoder_bench.py --group benchmark      # the eight-encoder benchmark
   python encoder_bench.py --group all
   python encoder_bench.py --stage classify       # reuse cached features
 ================================================================================
@@ -78,7 +82,8 @@ CLASS_NAMES = [ID_TO_CATEGORY[i] for i in range(4)]
 
 # ---------------------------------------------------------------- roster
 # group: 'paper'     = what the manuscript already uses (reference rows)
-#        'reviewer'  = explicitly named by R1 or R2
+#        'reviewer'  = newer foundation models and transfer-learning controls
+#                      (the label is stored in result rows, so it is kept)
 #        'objective' = same ViT-B/16 capacity, different pretraining objective
 ENCODERS = {
     # --- reference: what the paper uses today -------------------------------
@@ -86,17 +91,17 @@ ENCODERS = {
                         note="paper's encoder"),
     "sam_b16":     dict(timm="samvit_base_patch16.sa1b",              group="paper",
                         note="paper's SAM encoder"),
-    # --- explicitly requested by the reviewers ------------------------------
+    # --- newer foundation models and transfer-learning controls -------------
     "dinov3_b16":  dict(timm="vit_base_patch16_dinov3.lvd1689m",      group="reviewer",
-                        note="R1-L1: DINOv3"),
+                        note="newer self-supervised encoder (DINOv3)"),
     "dinov2_reg":  dict(timm="vit_base_patch14_reg4_dinov2.lvd142m",  group="reviewer",
                         note="registers remove the high-norm artifact tokens in Fig 6"),
     "sam2_hiera":  dict(timm="sam2_hiera_base_plus.fb_r896_2pt1",     group="reviewer",
-                        note="modern segmentation encoder; answers 2023-model staleness"),
+                        note="modern segmentation encoder; successor to the 2023 SAM"),
     "resnet50":    dict(timm="resnet50.a1_in1k",                      group="reviewer",
-                        note="R2-1: conventional transfer learning"),
+                        note="conventional transfer-learning control"),
     "supvit_b16":  dict(timm="vit_base_patch16_224.augreg2_in21k_ft_in1k", group="reviewer",
-                        note="R2-1: supervised ViT"),
+                        note="supervised ViT (transfer-learning control)"),
     "convnextv2_b": dict(timm="convnextv2_base.fcmae_ft_in1k",        group="reviewer",
                         note="modern CNN control"),
     # --- same capacity, different pretraining objective ---------------------
@@ -107,26 +112,30 @@ ENCODERS = {
     "mae_b16":     dict(timm="vit_base_patch16_224.mae",              group="objective",
                         note="masked-autoencoder reconstruction"),
     "usam_b":      dict(timm="samvit_base_patch16.sa1b",              group="reviewer",
-                        note="R1-L1: uSAM. NOTE - set --usam-checkpoint to the "
+                        note="microscopy-specific SAM (micro-SAM); not in the "
+                             "reported benchmark. NOTE - set USAM_CHECKPOINT to the "
                              "micro-sam vit_b_em_organelles weights; its EM training "
                              "data (MitoLab/MitoEM/PlatyEM) contains no materials "
                              "imagery and its own docs send non-cellular tasks back "
                              "to stock SAM"),
     # --- capacity NOT matched: include only with the caveat printed ---------
     "ijepa_h14":   dict(timm="vit_huge_patch14_gap_224.in1k_ijepa",   group="unmatched",
-                        note="R1-L1: JEPA. ViT-H/630M -- no ViT-B release exists, "
+                        note="I-JEPA; not in the reported benchmark. ViT-H/630M -- "
+                             "no ViT-B release exists, "
                              "so this is NOT capacity-matched to the ViT-B rows"),
 }
 
 GROUPS = {
     "paper": ["dinov2_b14", "sam_b16"],
-    "reviewers": ["dinov2_b14", "dinov3_b16", "dinov2_reg", "sam_b16", "sam2_hiera",
+    "benchmark": ["dinov2_b14", "dinov3_b16", "dinov2_reg", "sam_b16", "sam2_hiera",
                   "resnet50", "supvit_b16", "convnextv2_b"],
     "usam": ["usam_b"],
     "objective": ["dinov2_b14", "clip_b16", "siglip2_b16", "mae_b16", "supvit_b16"],
     "all": [k for k in ENCODERS if k != "ijepa_h14"],
     "everything": list(ENCODERS),
 }
+# Earlier name for "benchmark", kept so existing commands still run.
+GROUPS["reviewers"] = GROUPS["benchmark"]
 
 POOLINGS = ("avg", "max", "avg+max")
 CLASSIFIERS = ("linear", "mlp")
@@ -901,7 +910,7 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--list", action="store_true", help="show the roster and exit")
     ap.add_argument("--encoders", nargs="+", default=None)
-    ap.add_argument("--group", choices=list(GROUPS), default="reviewers")
+    ap.add_argument("--group", choices=list(GROUPS), default="benchmark")
     ap.add_argument("--splits", type=Path, default=cnt_paths.splits_file(),
                     help="split pickle (default: <repo>/splits/dataset_splits.pkl)")
     ap.add_argument("--root", type=Path, default=None,
@@ -956,7 +965,8 @@ def main(argv=None):
         for k, v in ENCODERS.items():
             log(f"{k:14} {v['group']:10} {v['timm']}")
             log(f"{'':25} {v['note']}")
-        log("\ngroups: " + ", ".join(f"{g} ({len(v)})" for g, v in GROUPS.items()))
+        log("\ngroups: " + ", ".join(f"{g} ({len(v)})" for g, v in GROUPS.items()
+                                     if g != "reviewers"))
         return
 
     if a.root is not None:

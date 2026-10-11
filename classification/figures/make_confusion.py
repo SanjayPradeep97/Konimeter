@@ -1,12 +1,12 @@
-"""Held-out test confusion matrix for the revised manuscript (single panel).
+"""Held-out test confusion matrix (single panel).
 
-Reviewer request: drop the whole-dataset confusion matrix -- it was computed on
-data the model trained on -- and report the held-out test set only.
+An earlier whole-dataset confusion matrix was computed on data the model
+trained on; this one reports the held-out test set only.
 
 Counts are read from the pre-specified configuration's per-image predictions,
 so the figure cannot drift from the number reported in the text.
 
-Aesthetics match the submitted Images/confusion_matrix_test.png: seaborn
+Aesthetics match the earlier confusion_matrix_test.png: seaborn
 'Blues', row-normalised, two-decimal annotations, colour scale pinned to [0,1],
 white cell separators.
 

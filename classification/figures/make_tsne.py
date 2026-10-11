@@ -1,12 +1,12 @@
 """t-SNE of the classifier's representation, HELD-OUT TEST IMAGES ONLY.
 
-The submitted figure embedded all images, including those the classifier was
+An earlier version embedded all images, including those the classifier was
 trained on, so the visible separation was partly memorisation.  This version
 embeds only the held-out test images.
 
-Aesthetics match the submitted Images/TSNE_evolution.png: palette
+Aesthetics match the earlier TSNE_evolution.png: palette
 saddlebrown / seagreen / steelblue / mediumpurple at alpha 0.8 (recovered by
-sampling the original PNG), same panel titles, same bold (a)/(b)/(c) headings,
+sampling that PNG), same panel titles, same bold (a)/(b)/(c) headings,
 frame on, ticks off.
 
 The embedded model is one single held-out model, reconstructed with the same

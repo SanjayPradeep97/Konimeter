@@ -968,7 +968,7 @@ def main(argv=None):
         json.dump(payload, fh, indent=2)
 
     if prog: prog.close()
-    banner("SUMMARY  (paste straight into the response letter)")
+    banner("SUMMARY")
     log(f"  Luo et al. re-implementation, {Path(cfg.splits).stem}")
     log(f"    5-fold CV accuracy (train+val) : {res['cv_mean_acc']:.2f}% "
         f"+/- {res['cv_std_acc']:.2f}%")

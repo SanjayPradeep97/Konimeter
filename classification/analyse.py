@@ -1,12 +1,11 @@
 """
-analyse.py -- the statistics that answer the reviewers.
+analyse.py -- paired significance tests and confidence intervals.
 
 WHY OUT-OF-FOLD AND NOT THE TEST SET
 ------------------------------------
-The reviewer's objection is that the advantage over Luo et al. is too small to
-claim state of the art.  Answering it needs a PAIRED test, and it needs enough
-samples to resolve the gap.  On a ~180-image test set, exact McNemar needs a
-~5-6 pp difference before p<0.05:
+The advantage over Luo et al. is small, so a state-of-the-art claim needs a
+PAIRED test, and it needs enough samples to resolve the gap.  On a ~180-image
+test set, exact McNemar needs a ~5-6 pp difference before p<0.05:
 
     b=9,  c=3   (3.3 pp)  p = 0.146
     b=12, c=4   (4.4 pp)  p = 0.077

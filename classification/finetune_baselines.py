@@ -6,12 +6,12 @@
  supervised ViT-B/16  vs  our frozen DINOv2 + mask-guided probe
 ================================================================================
 
-Reviewer 2 asked for "a fine-tuned ResNet-50, YOLOv11, or supervised ViT to
-clearly demonstrate the claim that foundation-model features outperform transfer
-learning". The encoder benchmark already covers ResNet-50 and a supervised ViT
-as FROZEN feature extractors, which is a different thing. This script fine-tunes
-the whole network end to end, which is what the comment actually asks for and is
-the harder test for us.
+Conventional transfer-learning controls: a fine-tuned ResNet-50, YOLO11 or
+supervised ViT, to test the claim that foundation-model features outperform
+transfer learning. The encoder benchmark already covers ResNet-50 and a
+supervised ViT as FROZEN feature extractors, which is a different thing. This
+script fine-tunes the whole network end to end, which is the direct form of
+that comparison and the harder test for us.
 
 GIVING THE BASELINES A FAIR SHOT
 --------------------------------
@@ -37,7 +37,7 @@ WHAT IS NOT MATCHED, AND WE SAY SO IN THE PAPER
 -----------------------------------------------
 These baselines update every weight; our DINOv2 pipeline trains only a small
 head on frozen features. That asymmetry favours the baselines on capacity and
-disfavours them on data efficiency. It is the comparison the reviewer wants --
+disfavours them on data efficiency. It is the comparison that matters here --
 frozen foundation features against a properly fine-tuned conventional network --
 so we report it rather than trying to equalise it away.
 
@@ -68,13 +68,13 @@ SEED = 42
 
 MODELS = {
     "resnet50":  dict(kind="timm", id="resnet50.a1_in1k",
-                      note="R2-I1: conventional transfer learning"),
+                      note="conventional transfer-learning control"),
     "vit_b16":   dict(kind="timm", id="vit_base_patch16_224.augreg2_in21k_ft_in1k",
-                      note="R2-I1: supervised ViT"),
+                      note="supervised ViT (transfer-learning control)"),
     "convnextv2":dict(kind="timm", id="convnextv2_base.fcmae_ft_in1k",
                       note="modern CNN control"),
     "yolo11":    dict(kind="yolo", id="yolo11s-cls.pt",
-                      note="R2-I1: YOLOv11 classification variant"),
+                      note="YOLOv11 classification variant"),
     "yolo26":    dict(kind="yolo", id="yolo26s-cls.pt",
                       note="current YOLO generation"),
 }

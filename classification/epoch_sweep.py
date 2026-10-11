@@ -2,7 +2,7 @@
 
 Decision metric is CROSS-VALIDATED (out-of-fold) accuracy.  The test column is
 printed as a diagnostic only: choosing the epoch budget by that column is
-exactly the mechanism that inflated the originally published figure, so it is
+exactly the mechanism that once inflated the reported accuracy, so it is
 labelled and must not be used for selection.
 
 Each budget trains for exactly that many epochs with early stopping OFF, over
