@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the paper below."
+title: "SAM-SEM-Segmentation: quantification and classification of carbon nanotubes in electron micrographs"
+type: software
+repository-code: "https://github.com/SanjayPradeep97/SAM-SEM-Segmentation"
+license: MIT
+authors:
+  - family-names: Pradeep
+    given-names: Sanjay
+preferred-citation:
+  type: article
+  title: "Quantification and Classification of Carbon Nanotubes in Electron Micrographs using Vision Foundation Models"
+  authors:
+    - family-names: Pradeep
+      given-names: Sanjay
+    - family-names: Wang
+      given-names: C.
+    - family-names: Dahm
+      given-names: M. M.
+    - family-names: Eldredge
+      given-names: J. D.
+    - family-names: Tsai
+      given-names: C. S. J.
+  journal: "Scientific Reports"
+  year: 2026
+  notes: "Under review. Update volume/pages/DOI on publication."

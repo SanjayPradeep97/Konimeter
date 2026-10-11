@@ -16,10 +16,13 @@ SCALE_JS = (Path(__file__).parent / "static" / "scale_canvas.js").read_text()
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="sem_analysis_app",
                                      description="SEM particle analysis web app")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="Address to listen on (default: this computer only)")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--share", action="store_true",
-                        help="Expose a public Gradio link")
+                        help="Also serve through a public Gradio link. Anyone "
+                             "with the link can open folders on this computer "
+                             "through the app")
     args = parser.parse_args(argv)
 
     import gradio as gr

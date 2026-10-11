@@ -448,13 +448,16 @@ def build_parser():
     analysis = parser.add_argument_group("analysis")
     analysis.add_argument("--min-size", type=int, default=30,
                           help="Discard particles smaller than this many pixels (default: 30)")
-    analysis.add_argument("--border-buffer", type=int, default=4)
+    analysis.add_argument("--border-buffer", type=int, default=4,
+                          help="Width in pixels of the strip along the frame edge "
+                               "cleared of mask before measuring (default: 4)")
     analysis.add_argument("--clear-edges", action="store_true",
                           help="Drop particles touching the frame edge; they are only "
                                "partly imaged, so their size is not a real measurement")
 
     output = parser.add_argument_group("output")
-    output.add_argument("--no-plots", action="store_true")
+    output.add_argument("--no-plots", action="store_true",
+                        help="Write the CSVs and run.json, but no size-distribution plots")
     output.add_argument("--no-checkpoint-hash", action="store_true",
                         help="Skip hashing the weights file (saves a few seconds)")
     return parser
