@@ -1,67 +1,7 @@
-# SEM Particle Analysis - Complete Requirements
-# Consolidated requirements for both the core analysis package and Gradio app
-
-# ============================================================================
-# Core Scientific Computing
-# ============================================================================
-numpy>=1.24.0
-pandas>=2.0.0
-matplotlib>=3.7.0
-scikit-image>=0.21.0
-opencv-python>=4.8.0
-Pillow>=10.0.0
-
-# ============================================================================
-# Deep Learning Framework (PyTorch)
-# ============================================================================
-# IMPORTANT: PyTorch installation varies by platform and GPU
+# The dependencies are declared in pyproject.toml. This file exists so that
+# "pip install -r requirements.txt" does the same as the README's
+# "pip install -e .".
 #
-# For RTX 5080 (Blackwell architecture, compute capability sm_120):
-#   Requires PyTorch 2.10+ nightly with CUDA 12.8
-#   pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
-#
-#   Current working version:
-#   torch==2.11.0.dev20260129+cu128
-#   torchvision==0.25.0.dev20260129+cu128
-#
-# For RTX 30/40 series (Ampere/Ada):
-#   conda install pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia
-#   Or: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-#
-# For Apple Silicon (M1/M2/M3/M4):
-#   conda install pytorch torchvision -c pytorch
-#   (Automatically uses MPS acceleration)
-#
-# For CPU only:
-#   conda install pytorch torchvision cpuonly -c pytorch
-#
-# See: https://pytorch.org/get-started/locally/
-torch>=2.0.0
-torchvision>=0.15.0
-
-# ============================================================================
-# Segment Anything Model (SAM)
-# ============================================================================
-# Install SAM from GitHub
-git+https://github.com/facebookresearch/segment-anything.git
-
-# ============================================================================
-# OCR for Scale Bar Detection
-# ============================================================================
-easyocr>=1.7.0
-
-# ============================================================================
-# TIFF Metadata Extraction
-# ============================================================================
-tifffile>=2023.1.0
-
-# ============================================================================
-# Gradio Web Interface
-# ============================================================================
-# 6.0 or later: both apps pass css, theme and head to launch(), a Gradio 6 API.
-gradio>=6.0
-
-# ============================================================================
-# Utilities
-# ============================================================================
-tqdm>=4.65.0
+# Install PyTorch first, as the README describes: otherwise EasyOCR pulls in the
+# default build, which on Windows is CPU-only.
+-e .

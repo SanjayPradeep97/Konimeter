@@ -1,14 +1,16 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "sem-particle-analysis"
 version = "0.2.0"
-description = "AI-powered particle segmentation and analysis for SEM/TEM images using Meta's SAM"
+description = "Particle segmentation and measurement in SEM/TEM micrographs, built on Segment Anything"
 readme = "README.md"
-requires-python = ">=3.9"
-license = {text = "MIT"}
+# Gradio 6 needs 3.10.
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Sanjay Pradeep"}
 ]
@@ -17,9 +19,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Image Processing",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -30,14 +30,18 @@ dependencies = [
     "pandas>=2.0.0",
     "matplotlib>=3.7.0",
     "scikit-image>=0.21.0",
-    "opencv-python>=4.8.0",
+    # Headless: nothing here opens an OpenCV window, and EasyOCR requires the
+    # headless build, so asking for opencv-python as well installs two copies of
+    # cv2 over each other.
+    "opencv-python-headless>=4.8.0",
     "Pillow>=10.0.0",
     "easyocr>=1.7.0",
     "tifffile>=2023.1.0",
     "tqdm>=4.65.0",
-    # 6.0 moved css, theme and head from Blocks() to launch(), which both apps use.
+    # 6.0 moved css, theme and head from Blocks() to launch(), which the app uses.
     "gradio>=6.0",
-    "segment-anything @ git+https://github.com/facebookresearch/segment-anything.git",
+    # Pinned to a commit: the repository publishes no releases.
+    "segment-anything @ git+https://github.com/facebookresearch/segment-anything.git@dca509fe793f601edb92606367a655c15ac00fdf",
 ]
 
 [project.scripts]
@@ -46,16 +50,18 @@ sem-analyze = "sem_particle_analysis.cli:main"
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
-    "black>=22.0.0",
-    "flake8>=4.0.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/SanjayPradeep97/SAM-SEM-Segmentation"
 Repository = "https://github.com/SanjayPradeep97/SAM-SEM-Segmentation"
+Issues = "https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/issues"
 
 [tool.setuptools.packages.find]
-where = ["sem_particle_analysis"]
+include = ["sem_particle_analysis*", "sem_analysis_app*"]
+
+[tool.setuptools.package-data]
+sem_analysis_app = ["static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
