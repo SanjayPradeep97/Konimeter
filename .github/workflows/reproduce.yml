@@ -1,0 +1,51 @@
+name: reproduce
+
+on:
+  push:
+    branches: [publication]
+  pull_request:
+    branches: [publication]
+  workflow_dispatch:
+
+jobs:
+  statistics:
+    # What can be checked without a GPU or the images: the CPU environment
+    # builds, the statistics recompute from the shipped per-image predictions
+    # to exactly the committed analysis.json, and every manuscript number still
+    # matches.
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash -el {0}
+    env:
+      KMP_DUPLICATE_LIB_OK: "TRUE"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          environment-file: environment-cpu.yml
+          activate-environment: cnt-vfm
+          auto-activate-base: false
+      - name: Environment check
+        run: python classification/check_env.py
+      - name: Recompute the statistics from the shipped predictions
+        run: |
+          python classification/paper_results.py --stages analyse
+          git diff --exit-code results/analysis.json
+      - name: Tables
+        run: python classification/make_tables.py
+      - name: Every manuscript number
+        run: python classification/verify_manuscript.py
+      - name: Protocol checks that need no data
+        run: |
+          python classification/check_cache_agreement.py --splits splits/dataset_splits.pkl
+          cd classification
+          python test_cache.py
+          python test_yolo_adapter.py
