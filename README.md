@@ -45,13 +45,13 @@ pip install -e .
 ### SAM weights
 
 ```bash
-python download_sam_weights.py
+python download_sam_weights.py --model vit_b
 ```
 
-Choose **3 (ViT-B, 358 MB)** unless you have a reason not to: the app loads it by
-default, and it is fast enough to use interactively on a laptop. ViT-H (2.4 GB)
-segments slightly better and can be picked from the app's dropdown when present.
-Weights go to `sam_weights/`.
+ViT-B (358 MB) is what the app loads by default, and is fast enough to use
+interactively on a laptop. ViT-H (2.4 GB) segments slightly better and can be
+picked from the app's dropdown once downloaded: `--model vit_b vit_h` fetches
+both. With no `--model` the script asks. Weights go to `sam_weights/`.
 
 The app uses an NVIDIA GPU (CUDA) or Apple Silicon (MPS) when it finds one, and
 the CPU otherwise.

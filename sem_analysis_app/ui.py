@@ -30,7 +30,6 @@ from .callbacks import (
     confirm_scale,
     frame_header,
     live_point_readout,
-    prepare_scale_tab,
     read_box_scale,
     set_canvas_mode,
     set_crop_override,
