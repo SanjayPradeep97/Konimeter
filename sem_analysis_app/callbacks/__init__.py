@@ -3,7 +3,6 @@
 from .setup import (
     initialize_sam,
     load_images_from_folder,
-    resume_session,
 )
 from .gallery import (
     create_image_gallery,
@@ -91,7 +90,6 @@ __all__ = [
     "read_box_scale",
     "reset_point_refine",
     "restore_session",
-    "resume_session",
     "save_and_next",
     "save_current_results",
     "segment_with_sam",

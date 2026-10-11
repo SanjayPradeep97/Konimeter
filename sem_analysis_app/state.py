@@ -19,7 +19,6 @@ class AppState:
         self.scale_detector = None
         self.segmenter = None
         self.results_manager = None
-        self.resumed_csv_path = None  # Path to resumed CSV, if any
 
         # Image management
         self.image_paths = []
@@ -294,12 +293,19 @@ class AppState:
         """Check if an image has been processed."""
         return index in self.processed_images
 
+    def _state_file(self):
+        """Where processing state is kept: beside the results file, so that
+        everything the app writes is in one place."""
+        if self.results_manager is not None and self.results_manager.csv_file:
+            return Path(self.results_manager.csv_file).parent / ".analysis_state.json"
+        return Path(self.image_paths[0]).parent / ".analysis_state.json"
+
     def save_state(self):
         """Save processing state to file."""
         if not self.image_paths:
             return
 
-        state_file = Path(self.image_paths[0]).parent / ".analysis_state.json"
+        state_file = self._state_file()
         state_data = {
             "processed_images": {
                 str(k): v for k, v in self.processed_images.items()
@@ -330,7 +336,7 @@ class AppState:
         if not self.image_paths:
             return
 
-        state_file = Path(self.image_paths[0]).parent / ".analysis_state.json"
+        state_file = self._state_file()
         if state_file.exists():
             with open(state_file, 'r') as f:
                 state_data = json.load(f)
