@@ -9,7 +9,6 @@ wrong reading still looks like a number.
 No OCR needed: this is the geometry half of the detector.
 """
 
-import cv2
 import numpy as np
 import pytest
 

@@ -371,10 +371,8 @@ class AppState:
         if len(results_df) == 0:
             return 0, 0
 
-        # Matched on the name without its extension. The review app reads PNG
-        # copies of frames the analysis measured as TIFFs, so the full names
-        # never agree and not one reviewed frame came back ticked — the gallery
-        # said no work had been done at all.
+        # Matched on the name without its extension, so a frame recorded
+        # under its TIFF name is still found when a PNG copy is open.
         by_stem = {}
         for _, row in results_df.iterrows():
             stem = os.path.splitext(str(row['file_name']))[0]

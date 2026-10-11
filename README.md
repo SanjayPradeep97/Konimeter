@@ -1,14 +1,16 @@
-# SAM-SEM Segmentation Toolkit
+# SAM-SEM Segmentation
 
-> **AI-powered segmentation and analysis of particles in electron microscopy images using Meta's Segment Anything Model (SAM)**
+Segment and measure particles in SEM and TEM micrographs with Meta's
+[Segment Anything Model](https://segment-anything.com/) (SAM): a web app for
+interactive analysis, and a command-line tool for running the same pipeline over
+a folder.
 
-This toolkit provides both a **Python package** for programmatic access and a **web-based GUI** for interactive analysis.
+For every image you get a particle count and, per particle, the area and the
+equivalent circular diameter, in pixels and in nanometres.
 
 ---
 
-## 🚀 Quick Start
-
-### 1. Setup Environment
+## Install
 
 You need [Miniconda or Anaconda](https://docs.conda.io/en/latest/miniconda.html)
 and [Git](https://git-scm.com/downloads) — the SAM package installs straight from
@@ -40,320 +42,181 @@ Then the package and everything else:
 pip install -e .
 ```
 
-### 2. Download SAM Weights
+### SAM weights
 
 ```bash
 python download_sam_weights.py
 ```
 
-Choose **3 (ViT-B, 358 MB)** unless you have a reason not to: both apps load it
-by default, and it is fast enough to use interactively on a laptop. ViT-H (2.4 GB)
-segments slightly better and is picked from the dropdown when present. Weights go
-to `sam_weights/`.
+Choose **3 (ViT-B, 358 MB)** unless you have a reason not to: the app loads it by
+default, and it is fast enough to use interactively on a laptop. ViT-H (2.4 GB)
+segments slightly better and can be picked from the app's dropdown when present.
+Weights go to `sam_weights/`.
 
-### 3. Run the Apps
+The app uses an NVIDIA GPU (CUDA) or Apple Silicon (MPS) when it finds one, and
+the CPU otherwise.
 
-There are two, for two stages of the work:
+---
 
-| App | For | Windows | Any platform | Opens at |
-| --- | --- | --- | --- | --- |
-| Analysis | Segmenting images one at a time, from scratch | `run_app.bat` | `python -m sem_analysis_app` | http://127.0.0.1:7860 |
-| Review | Correcting and signing off a folder a batch run pre-analysed | `run_review_app.bat` | `python -m sem_review_app` | http://127.0.0.1:7870 |
+## Run the app
 
-The `.bat` launchers find conda wherever it is installed and activate
-`SEM_analysis`; set `SEM_ENV` first to use another environment. Either app takes
-`--port` and `--host`; the review app also takes `--folder` to open a folder on
-startup, and moves to the next free port if 7870 is taken.
+| | |
+| --- | --- |
+| Windows | double-click `run_app.bat` |
+| Any platform | `python -m sem_analysis_app` |
 
-On Windows, outside the launchers, set `KMP_DUPLICATE_LIB_OK=TRUE` first —
-PyTorch and NumPy each ship an OpenMP runtime and otherwise refuse to share a
-process.
+Then open http://127.0.0.1:7860. `--port` and `--host` change where it listens.
 
-### 4. Establishing Scale
+`run_app.bat` finds conda wherever it is installed and activates `SEM_analysis`;
+set `SEM_ENV` first to use another environment. On Windows outside the launcher,
+set `KMP_DUPLICATE_LIB_OK=TRUE` before starting — PyTorch and NumPy each ship an
+OpenMP runtime and otherwise refuse to share a process.
 
-Scale gets its own tab, because every measurement is a pixel count multiplied by
-this one number. Three tiers, tried in order of trustworthiness:
+### The tabs, in the order you use them
 
-| Tier | Method | When it applies |
+| Tab | What happens there |
+| --- | --- |
+| ⚙️ Setup | Load a SAM checkpoint and choose a folder of images. Results go to `analysis_results.csv` in that folder; an existing one can be resumed |
+| 🖼️ Gallery | Pick an image. Ticked images already have saved results |
+| 📏 Scale & Frame | Establish the scale, and check what the app decided about the image (see below) |
+| 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include/exclude clicks. Every click and every applied change can be undone |
+| 💾 Results | The measurements per image, and the whole folder's results: delete rows, remove duplicates, export |
+| 📊 Plots | Size distributions across everything saved |
+
+The app keeps one process-wide session, so it is built for one analyst at a time;
+two browser tabs pointed at the same server share it.
+
+### Scale
+
+Every measurement is a pixel count multiplied by one number, so scale gets its own
+tab. Three methods, tried in order of trustworthiness:
+
+| | Method | When |
 | --- | --- | --- |
 | 1 | Pixel size read from the file's own metadata | Automatic on load. Exact — nothing to check |
-| 2 | Read the printed scale bar inside a box you draw | Runs automatically first; drag the box if it got it wrong |
-| 3 | Click both ends of the bar and type its length | When the bar is unreadable. A magnifier follows the cursor so you land on the exact pixel |
+| 2 | Read the printed scale bar inside a box | Runs automatically when there is no metadata. Drag to draw the box, a corner to resize it, the middle to move it |
+| 3 | Click both ends of the bar and type its length | When the bar cannot be read. A 7x magnifier follows the cursor so you land on the exact pixel |
 
-Tier 2's box is manipulated directly on the image: drag anywhere to draw one,
-drag a corner to resize, drag the middle to move. Tier 3 shows a 7x loupe with a
-crosshair marking precisely which pixel a click will land on.
+A reading from the printed bar is marked unconfirmed until you press **Confirm
+scale**, and the measured span is drawn on the bar so you can see what was read.
+Metadata and hand measurement are trusted outright, since neither involves a
+machine reading a glyph. The result is shown as "X nm/px · how it was obtained",
+and is what segmentation and the results file use; how the scale was obtained is
+recorded beside every row in the `scale_method` column.
 
-A tier-2 reading is marked unconfirmed until you press **Confirm scale**; tier 1
-and tier 3 are trusted outright, since neither involves a machine reading a
-glyph. The result is shown as "X nm/px · how it was obtained", and it is what the
-Processing tab and the results CSV use. Nothing downstream re-detects scale or
-overrides what you set here.
+Scale needs only OCR, not SAM, so it can be sorted out before loading a checkpoint.
 
-Calibration needs only OCR, so you can sort out scale before loading a SAM
-checkpoint.
-
-### 5. SEM and TEM in One Workflow
+### SEM and TEM
 
 The two need opposite handling, and the app works out which it is looking at from
-the file rather than asking you to remember:
+the file:
 
 | | SEM | TEM |
 | --- | --- | --- |
 | Instrument read from | FEI / Zeiss / Hitachi / TESCAN tags | JEOL mode tag, else frame shape |
-| Databar | detected and trimmed | none — frame kept whole |
-| Scale bar | in the databar, which gets cropped | burned into the frame, so its patch is excluded from measurement |
+| Information strip (databar) | detected and cropped off | none — frame kept whole |
+| Scale bar | in the databar | burned into the frame, so its patch is excluded from measurement |
 | Particles are | **brighter** than the substrate | **darker** than the support film |
 
-Both decisions are shown on the Scale tab and can be overridden there, or with
-`--modality` and `--particles` in batch mode.
+Both decisions are shown on the Scale & Frame tab and can be overridden there, or
+with `--modality` and `--particles` in batch mode.
 
-**Analysable region.** Micrographs routinely contain large areas that are not
-specimen — the black corners left by a circular aperture, a specimen grid bar
-blocking the beam, a burned-in scale bar. Every one of them out-contrasts the
-particles, so they are excluded before anything is measured. Left in, they are
-what gets measured: on real frames these produced five "particles" of 119 µm
-that were the corner wedges, and 221 spurious particles that were a grid bar.
-The share excluded is shown on the Scale tab and recorded per image in
-`run.json`.
+Micrographs often contain large areas that are not specimen — the black corners
+left by a circular aperture, a grid bar blocking the beam, a burned-in scale bar.
+Each of them out-contrasts the particles, so they are excluded before anything is
+measured. The share excluded is shown on the Scale & Frame tab.
 
-**Magnification.** Low-magnification overviews are navigation frames; their
-particles are a few pixels across and counting them adds noise. `--max-nm-per-px`
-skips them, and skipped frames are recorded as skipped rather than failed.
+Prefer **original TIFFs straight from the microscope**: once an image has been
+converted to PNG or JPEG, or cropped in another tool, its pixel-size metadata is
+gone and scale has to come from the printed bar or from a hand measurement.
 
-### 6. Batch Analysis Without the GUI
+---
 
-For a dataset you intend to publish, run the pipeline headless. Every run writes
-a `run.json` recording the image hashes, model and checkpoint hash, the scale and
-how it was obtained, all parameters, library versions and the git revision — so a
+## Batch analysis
+
+The same pipeline without the interface, for a whole folder. Every run writes a
+`run.json` recording the image hashes, model and checkpoint hash, the scale and
+how it was obtained, all parameters, library versions and the git revision, so a
 result can be traced back to exactly what produced it.
 
 ```bash
-sem-analyze data/raw/sample-a -o data/processed/sample-a --clear-edges
+sem-analyze path/to/images -o path/to/output --model-type vit_b --clear-edges
 ```
 
 Outputs: `particles.csv` (one row per particle), `per_image_summary.csv`,
 `size_distribution.png/.pdf` at 300 dpi, and `run.json`.
 
-Useful flags:
-
 | Flag | Effect |
 | --- | --- |
-| `--scale-nm-per-px X` | Fix the scale instead of detecting it per image |
+| `--model-type vit_b\|vit_l\|vit_h` | Which SAM weights to use (default `vit_h`) |
+| `--checkpoint PATH` | Use this weights file instead of looking in `sam_weights/` |
+| `--scale-nm-per-px X` | Fix the scale instead of establishing it per image |
 | `--scale-method metadata\|ocr\|auto` | How to establish scale (default `auto`) |
 | `--clear-edges` | Drop particles touching the frame; they are only partly imaged |
 | `--min-size N` | Ignore particles below N pixels (default 30) |
 | `--crop-percent P` | Override databar removal (default: measure it) |
-| `--model-type vit_b` | Faster, lower quality than the default `vit_h` |
 | `--modality SEM\|TEM` | Force the instrument kind (default: read it from the file) |
 | `--particles bright\|dark` | Force particle polarity (default: follow the modality) |
 | `--max-nm-per-px X` | Skip frames coarser than this — magnifications too low to resolve particles |
 | `--min-nm-per-px X` | Skip frames finer than this |
 
-Note that batch mode uses the automatic pipeline only — no interactive
-refinement — and picks its mask candidate by heuristic. The chosen mask and the
-rejected candidates are recorded in `run.json`.
+Batch mode is the automatic pipeline only, with no interactive correction, and
+picks its mask candidate by heuristic; the chosen mask and the rejected candidates
+are recorded in `run.json`. Check its output before relying on the counts.
 
-### 7. Reviewing a Pre-analysed Folder
+---
 
-Automatic segmentation gets most frames nearly right and a few badly wrong, so
-for counts you intend to publish it is a first draft. The review app opens a
-folder of masks somebody (or something) has already made and gives you the same
-Remove / Add / Merge / Redraw tools to correct them, one frame at a time.
+## Output
 
-It expects this layout:
+`analysis_results.csv` has one row per image:
 
-```
-C1_analysis/
-├── raw/                    one PNG per frame
-├── mask/                   one black-and-white PNG per frame, same name
-├── overlay/                optional; the thumbnails shown in the Frames tab
-└── analysis_results.csv    optional; each frame's scale (file_name, nm_per_px,
-                            scale_method). Without it, set the scale in the app.
-```
-
-Point it at the folder with **Open folder** or `--folder`. Each frame opens with
-its scale from `analysis_results.csv`, which the 📏 Scale panel lets you check
-against the bar and confirm, or replace by clicking the bar's two ends.
-
-What it writes, beside the originals rather than over them:
-
-| File | Contents |
+| Column | Contents |
 | --- | --- |
-| `reviewed_results.csv` | One row per signed-off frame, same columns as the analysis app's results; saving a frame again replaces its row |
-| `mask_reviewed/` | Your corrected mask for every frame you changed |
-| `overlay_reviewed/` | The frame with your corrected mask drawn over it |
+| `file_name` | the image |
+| `num_particles` | particle count |
+| `nm_per_px` | the scale used |
+| `scale_method` | how that scale was obtained, e.g. `metadata`, `box_ocr`, `two_points`; `+unconfirmed` if nobody confirmed it |
+| `particle_areas_px`, `particle_areas_nm2` | each particle's area |
+| `equiv_diameters_px`, `equiv_diameters_nm` | each particle's equivalent circular diameter |
 
-Corrections are written when you leave a frame, not only when you save it, so
-closing the app — or losing power — does not lose them. Reopening a frame shows
-your version; **Reload from analysis** puts the original back.
+Supported images: `.tif`, `.tiff`, `.png`, `.jpg`, `.jpeg`.
 
-### 8. Use as Python Package
+---
 
-```python
-from sem_particle_analysis import SAMModel, ParticleAnalyzer
-
-# Your code here
-```
-
-### 9. Run the Tests
+## Tests
 
 ```bash
+pip install pytest
 pytest                      # everything
-pytest -m "not slow"        # skip tests needing model weights or OCR
+pytest -m "not slow"        # skip the tests needing SAM weights or EasyOCR
 ```
 
-The fast suite takes a few seconds and needs neither SAM weights nor EasyOCR;
-tests that do are marked `slow` and skip themselves with a reason when their
-dependency is missing. Measurements are checked against shapes of exactly known
-size — `tests/synthetic.py` builds micrographs whose scale bar length, printed
-label and particle mask are all ground truth — so a regression shows up as a
-wrong number rather than merely a changed one.
+Measurements are checked against shapes of exactly known size —
+`tests/synthetic.py` builds micrographs whose scale bar length, printed label and
+particle mask are all ground truth — so a regression shows up as a wrong number
+rather than merely a changed one.
 
-### Optional dependencies
-
-Only two parts of the toolkit need the heavy optional stack:
-
-| Dependency | Needed for | Without it |
-| --- | --- | --- |
-| `easyocr` | Reading a printed scale bar (tier 2) | Scale from metadata or by hand still works; OCR raises `OCRUnavailableError` explaining the fix |
-| `gradio` | The web app | The library and `sem-analyze` are unaffected |
-
-Importing `sem_particle_analysis` pulls in neither. EasyOCR's models load on
-first OCR use rather than when a `ScaleDetector` is constructed, so a
-metadata-only run never pays for them.
+Importing `sem_particle_analysis` pulls in neither EasyOCR nor Gradio: without
+EasyOCR, scale from metadata or by hand still works, and the library and
+`sem-analyze` do not need Gradio.
 
 ---
 
-## 📦 What's Included
-
-### 1. **Gradio Web Application** (`sem_analysis_app/`)
-
-A beautiful, production-ready web interface with:
-
-- **🤖 AI-Powered Segmentation**: Automatic particle detection using SAM
-- **📏 Auto Scale Detection**: OCR-based scale bar recognition and calibration
-- **✏️ Interactive Refinement**: Add, delete, merge particles; point-based refinement with live preview
-- **📊 Real-time Analysis**: Particle measurements with histograms and statistics
-- **💾 Batch Processing**: Process multiple images with session tracking
-- **📈 Results Management**: CSV export, duplicate removal, row deletion
-- **↩️ Undo/Redo**: Click-level undo for refinement operations
-- **🎯 Advanced Features**: Edge particle removal, particle number toggle, size filtering
-
-Module layout:
+## Layout
 
 ```
-sem_analysis_app/
-├── __main__.py       entry point (python -m sem_analysis_app)
-├── ui.py             tab layout and event wiring
-├── state.py          shared application state
-├── callbacks/        event handlers, one module per tab
-└── visualization.py  overlays and figures
+sem_analysis_app/        the web app (python -m sem_analysis_app)
+sem_particle_analysis/   the library and the sem-analyze command
+tests/                   the test suite
+download_sam_weights.py  fetches SAM checkpoints into sam_weights/
+run_app.bat              Windows launcher
 ```
 
-The app keeps a single process-wide state object, so it is built for one analyst
-at a time; two browser tabs pointed at the same server share one session.
-
-See [`sem_analysis_app/README.md`](sem_analysis_app/README.md) for detailed usage instructions.
-
-### 2. **Review App** (`sem_review_app/`)
-
-A second interface for the correction pass over a pre-analysed folder — see
-[Reviewing a Pre-analysed Folder](#7-reviewing-a-pre-analysed-folder). It reuses
-the analysis app's refinement tools rather than reimplementing them, so a fix in
-one is a fix in both.
-
-### 3. **Python Package** (`sem_particle_analysis/`)
-
-A clean, modular Python library for programmatic access:
-
-- Scale detection and image preprocessing
-- SAM-based particle segmentation
-- Particle analysis and measurements
-- Results export to CSV
-- Interactive Jupyter notebook widgets (legacy)
-
-See [`sem_particle_analysis/README.md`](sem_particle_analysis/README.md) for API documentation.
-
 ---
 
-## 🎯 Key Features
+## Citation
 
-### Automatic Scale Detection
-- OCR-based scale bar detection using EasyOCR
-- Support for both horizontal and vertical scale bars
-- Manual override option for non-standard scales
-
-### Advanced Particle Refinement
-- **Delete Mode**: Click particles to remove false positives
-- **Add Mode**: Click to add missed particles
-- **Merge Mode**: Combine touching particles
-- **Point Refine Mode**: Iterative refinement with positive/negative points
-- Undo individual clicks before applying changes
-- Real-time visualization with live previews
-
-### Comprehensive Analysis
-- Particle count and size distribution
-- Area measurements (pixels and nm²)
-- Equivalent diameter calculations
-- Summary statistics (mean, median, std, min, max)
-- Aggregate statistics across all images in session
-
-### Results Management
-- Auto-save to CSV after each image
-- Session-wide tracking and export
-- Duplicate detection and removal
-- Individual row deletion
-- State persistence across sessions
-
----
-
-## 💻 System Requirements
-
-- **Python**: 3.11 or higher
-- **GPU**: Optional but recommended
-  - NVIDIA GPU with CUDA support (RTX 5080, 4090, 3090, etc.)
-  - Apple Silicon (M1/M2/M3/M4) with MPS support
-  - CPU fallback available (slower)
-- **RAM**: 8GB minimum, 16GB+ recommended
-- **Storage**: ~3GB for SAM model + your images
-
-### Performance Expectations
-- **RTX 5080 (CUDA)**: 1-3 seconds per image
-- **Apple Silicon (MPS)**: 2-5 seconds per image
-- **CPU**: 10-30 seconds per image
-
----
-
-## 📚 Documentation
-
-- **Web App Guide**: [`sem_analysis_app/README.md`](sem_analysis_app/README.md)
-- **Python API**: [`sem_particle_analysis/README.md`](sem_particle_analysis/README.md)
-
----
-
-## 🔧 Supported Image Formats
-
-- `.tif`, `.tiff`
-- `.png`
-- `.jpg`, `.jpeg`
-
----
-
-## 📊 Output Data
-
-Results are exported as CSV files containing:
-- Filename
-- Particle count
-- Individual particle areas (pixels and nm²)
-- Equivalent diameters (pixels and nm)
-- Easy integration with Excel, Python, R, etc.
-
----
-
-## 🎓 Citation
-
-This tool uses Meta's Segment Anything Model (SAM):
+This tool uses Meta's Segment Anything Model:
 
 ```bibtex
 @article{kirillov2023segment,
@@ -364,24 +227,10 @@ This tool uses Meta's Segment Anything Model (SAM):
 }
 ```
 
----
+## License
 
-## 📝 License
+MIT — see [LICENSE](LICENSE).
 
-MIT License - See LICENSE file for details
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
----
-
-## 🙏 Acknowledgments
-
-Built with:
-- [Segment Anything Model](https://segment-anything.com/) by Meta AI
-- [Gradio](https://gradio.app/) for the web interface
-- [EasyOCR](https://github.com/JaidedAI/EasyOCR) for scale detection
-- [scikit-image](https://scikit-image.org/) for image processing
+Built with [Segment Anything](https://segment-anything.com/),
+[Gradio](https://gradio.app/), [EasyOCR](https://github.com/JaidedAI/EasyOCR) and
+[scikit-image](https://scikit-image.org/).

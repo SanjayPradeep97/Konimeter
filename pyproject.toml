@@ -49,10 +49,6 @@ dev = [
     "black>=22.0.0",
     "flake8>=4.0.0",
 ]
-jupyter = [
-    "jupyter>=1.0.0",
-    "ipywidgets>=7.6.0",
-]
 
 [project.urls]
 Homepage = "https://github.com/SanjayPradeep97/SAM-SEM-Segmentation"

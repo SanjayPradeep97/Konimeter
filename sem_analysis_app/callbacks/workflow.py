@@ -16,7 +16,7 @@ import gradio as gr
 from ..state import state
 from .segmentation import segment_with_sam
 from .results import save_current_results
-from .scale_tab import frame_header, frame_summary, prepare_scale_tab
+from .scale_tab import frame_header, prepare_scale_tab
 
 
 def _load_index(index):

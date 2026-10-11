@@ -1264,7 +1264,7 @@ class ScaleDetector:
         }
 
         if warning:
-            print(f"⚠️  {warning}")
+            print(f"{warning}")
 
         return self.last_detection
 

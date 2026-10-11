@@ -7,7 +7,6 @@ run, so a regression shows up as a wrong number and not merely a changed one.
 
 import numpy as np
 import pytest
-from skimage import measure
 
 from sem_particle_analysis import ParticleAnalyzer
 from synthetic import make_disk_mask

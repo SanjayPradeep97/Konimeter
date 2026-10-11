@@ -1,9 +1,5 @@
-"""
-SEM Particle Analysis Package
-
-A Python package for segmenting and analyzing particles in SEM/TEM images
-using Meta's Segment Anything Model (SAM).
-"""
+"""Segmentation and measurement of particles in SEM/TEM micrographs,
+built on Meta's Segment Anything Model."""
 
 from . import modality, region
 from .model import SAMModel, discover_checkpoints, infer_model_type
@@ -11,14 +7,6 @@ from .scale_detection import OCRUnavailableError, ScaleDetector
 from .segmentation import ParticleSegmenter
 from .analysis import ParticleAnalyzer
 from .data_manager import ResultsManager
-
-# Optional import for Jupyter notebook support
-try:
-    from .interactive import InteractiveRefiner
-    _has_interactive = True
-except ImportError:
-    InteractiveRefiner = None
-    _has_interactive = False
 
 # Single source of truth is the version in pyproject.toml; read it back from the
 # installed distribution so the two can't drift apart.
@@ -40,7 +28,3 @@ __all__ = [
     "ParticleAnalyzer",
     "ResultsManager",
 ]
-
-# Only add InteractiveRefiner if ipywidgets is available
-if _has_interactive:
-    __all__.append("InteractiveRefiner")

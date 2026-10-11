@@ -7,7 +7,7 @@ inputs, the model, the scale and where it came from, every parameter, and the
 library versions. Interactive refinement is deliberately not available here —
 anything this tool reports came out of the automatic pipeline alone.
 
-    sem-analyze data/raw/sample-a -o data/processed/sample-a
+    sem-analyze path/to/images -o path/to/output
 """
 
 import argparse
@@ -506,7 +506,7 @@ def main(argv=None):
             "num_particles": stats.get("num_particles", 0),
         })
 
-        note = f"  ⚠️  {scale_warning}" if scale_warning else ""
+        note = f"  {scale_warning}" if scale_warning else ""
         blocked = 1 - result["region"]["analysable_fraction"]
         blocked_note = f", {100 * blocked:.0f}% blocked" if blocked > 0.005 else ""
         print(f"    {result['modality'].kind}: {stats.get('num_particles', 0)} particles, "

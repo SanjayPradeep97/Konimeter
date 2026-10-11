@@ -11,12 +11,18 @@ from pathlib import Path
 import pytest
 
 from sem_particle_analysis import discover_checkpoints, infer_model_type
+from sem_particle_analysis import model as model_module
 from sem_particle_analysis.model import is_full_checkpoint
 
 
 @pytest.fixture
-def weights(tmp_path):
-    """A directory holding all three canonical checkpoints, plus a fragment."""
+def weights(tmp_path, monkeypatch):
+    """A directory holding all three canonical checkpoints, plus a fragment.
+
+    The default search directories are switched off so that a real checkpoint
+    in the repository's ``sam_weights/`` (there is one after running the demo)
+    cannot leak into the list being tested."""
+    monkeypatch.setattr(model_module, "_default_search_dirs", lambda: [])
     for name in ("sam_vit_h_4b8939.pth", "sam_vit_l_0b3195.pth",
                  "sam_vit_b_01ec64.pth", "decoder_only.pth"):
         (tmp_path / name).write_bytes(b"not a real checkpoint")

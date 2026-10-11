@@ -180,10 +180,10 @@ class SAMModel:
             if torch.backends.mps.is_available() and torch.backends.mps.is_built():
                 device = torch.device("mps")
                 device_name = "Apple Silicon GPU (MPS)"
-                print(f"✓ Using device: {device_name}")
+                print(f"Using device: {device_name}")
                 return device
         except Exception as e:
-            print(f"⚠️  MPS detection error: {e}")
+            print(f"MPS detection error: {e}")
 
         # Priority 2: NVIDIA CUDA GPU - for Windows/Linux with NVIDIA GPUs
         try:
@@ -191,16 +191,16 @@ class SAMModel:
                 gpu_name = torch.cuda.get_device_name(0)
                 device = torch.device("cuda")
                 device_name = f"NVIDIA GPU (CUDA) - {gpu_name}"
-                print(f"✓ Using device: {device_name}")
+                print(f"Using device: {device_name}")
                 return device
         except Exception as e:
-            print(f"⚠️  CUDA detection error: {e}")
+            print(f"CUDA detection error: {e}")
 
         # Priority 3: CPU fallback
         device = torch.device("cpu")
         device_name = "CPU (no GPU detected)"
-        print(f"✓ Using device: {device_name}")
-        print("⚠️  No GPU acceleration available. Processing will be slower.")
+        print(f"Using device: {device_name}")
+        print("No GPU acceleration available. Processing will be slower.")
         return device
 
     def set_image(self, image):

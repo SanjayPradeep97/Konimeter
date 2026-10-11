@@ -209,8 +209,8 @@ class ResultsManager:
                 has been corrected, not that a second image was measured — and
                 two rows for one frame count its particles twice in every
                 total drawn from the file. Matched on the name without its
-                extension: the review app works from PNG copies of TIFFs, and
-                one frame saved once under each name is still one frame.
+                extension, so a frame saved once as a TIFF and once as a PNG
+                copy is still one frame.
 
         Returns:
             bool: True if successful

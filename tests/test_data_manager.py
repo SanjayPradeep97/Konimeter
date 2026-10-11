@@ -190,7 +190,7 @@ class TestSerialisation:
 
     def test_a_real_analyzer_result_round_trips(self, tmp_path):
         # End to end: measure, save, read back. This is the path the Plotting tab
-        # and analyze_results.ipynb both take.
+        # takes.
         import numpy as np
         from sem_particle_analysis import ParticleAnalyzer
 

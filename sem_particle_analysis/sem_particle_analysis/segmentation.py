@@ -5,7 +5,6 @@ Handles SAM-based particle segmentation with mask generation and selection.
 """
 
 import numpy as np
-from skimage import morphology
 
 from ._compat import remove_objects_smaller_than
 

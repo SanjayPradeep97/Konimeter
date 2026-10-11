@@ -1,9 +1,8 @@
 @echo off
-REM Activate the conda environment both launchers run in.
+REM Activate the conda environment run_app.bat runs in.
 REM
 REM The environment is SEM_analysis, the one the README sets up. Set SEM_ENV
-REM before running to use a different one. If SEM_analysis does not exist but
-REM cnt-imaging does, that is used instead.
+REM before running to use a different one.
 REM
 REM Conda is found wherever it was installed: through CONDA_EXE when started
 REM from an Anaconda Prompt, otherwise in the usual install folders.
@@ -25,9 +24,6 @@ set "ENV_DIR="
 for %%E in ("%CONDA_ROOT%\envs\%SEM_ENV%" "%USERPROFILE%\.conda\envs\%SEM_ENV%") do (
     if not defined ENV_DIR if exist "%%~E\python.exe" set "ENV_DIR=%%~E"
 )
-if not defined ENV_DIR if "%SEM_ENV%"=="SEM_analysis" (
-    if exist "%CONDA_ROOT%\envs\cnt-imaging\python.exe" set "ENV_DIR=%CONDA_ROOT%\envs\cnt-imaging"
-)
 if not defined ENV_DIR (
     echo ERROR: conda environment "%SEM_ENV%" not found under %CONDA_ROOT%\envs
     echo Create it as the README describes, or set SEM_ENV to the one you use.
@@ -46,7 +42,7 @@ if /i not "%CONDA_PREFIX%"=="%ENV_DIR%" (
 if /i not "%CONDA_PREFIX%"=="%ENV_DIR%" (
     echo ERROR: could not activate %ENV_DIR%
     echo Try again, or activate it yourself in an Anaconda Prompt and run
-    echo "python -m sem_analysis_app" or "python -m sem_review_app" from here.
+    echo "python -m sem_analysis_app" from here.
     exit /b 1
 )
 
