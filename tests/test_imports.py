@@ -46,15 +46,14 @@ PROBE = """
 def probe():
     """Import the package in a clean interpreter and report what happened.
 
-    The interpreter is pointed at this checkout's library, as conftest.py does
-    for the in-process tests, so the probe works from a plain clone as well as
+    The interpreter is pointed at the repository root, as conftest.py does for
+    the in-process tests, so the probe works from a plain checkout as well as
     from an editable install."""
     import os
     from pathlib import Path
-
-    library = str(Path(__file__).resolve().parent.parent / "sem_particle_analysis")
+    repo_root = str(Path(__file__).resolve().parent.parent)
     env = dict(os.environ)
-    env["PYTHONPATH"] = library + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = repo_root + os.pathsep + env.get("PYTHONPATH", "")
     result = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(PROBE)],
         capture_output=True, text=True, timeout=300, env=env,

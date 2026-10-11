@@ -75,8 +75,8 @@ def _polarity(args, kind):
     return kind.dark_particles
 
 def _repo_root():
-    # cli.py -> sem_particle_analysis -> sem_particle_analysis -> repo root
-    return Path(__file__).resolve().parents[2]
+    # cli.py -> sem_particle_analysis -> repo root
+    return Path(__file__).resolve().parents[1]
 
 
 def find_checkpoint(model_type):

@@ -19,10 +19,17 @@ CHECKPOINT_FILENAMES = {
     "vit_b": "sam_vit_b_01ec64.pth",
 }
 
-# Searched in order when no explicit path is given.
+# Searched in order when no explicit path is given: the directory named by
+# SAM_WEIGHTS_DIR, if set; the checkout's sam_weights/, which is where
+# download_sam_weights.py puts them; and sam_weights/ under the current directory,
+# for an install that does not live in the checkout.
 def _default_search_dirs():
-    repo_root = Path(__file__).resolve().parents[2]
-    return [repo_root / "sam_weights", Path.home() / "segment-anything" / "models"]
+    dirs = []
+    if os.environ.get("SAM_WEIGHTS_DIR"):
+        dirs.append(Path(os.environ["SAM_WEIGHTS_DIR"]).expanduser())
+    dirs.append(Path(__file__).resolve().parents[1] / "sam_weights")
+    dirs.append(Path.cwd() / "sam_weights")
+    return dirs
 
 
 def infer_model_type(path, default="vit_h"):
