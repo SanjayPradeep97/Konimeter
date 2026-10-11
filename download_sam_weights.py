@@ -10,7 +10,7 @@ Available models:
 - ViT-L (vit_l): Good balance of quality and speed (1.2 GB)
 - ViT-B (vit_b): Fastest, smallest model (358 MB)
 
-Non-interactive use (what the demo's launch scripts do):
+Non-interactive use, for scripts and installers:
 
     python download_sam_weights.py --model vit_b
     python download_sam_weights.py --model vit_b vit_h
@@ -74,11 +74,11 @@ def download_file(url, destination):
 
 def choose_interactively():
     print("\nWhich model(s) would you like to download?")
-    print("  1. ViT-H (best quality, recommended)")
-    print("  2. ViT-L (good balance)")
-    print("  3. ViT-B (fastest)")
+    print("  1. ViT-H (best quality, 2.4 GB)")
+    print("  2. ViT-L (1.2 GB)")
+    print("  3. ViT-B (fastest, 358 MB; what the app loads first, recommended)")
     print("  4. All models")
-    print("  5. ViT-H and ViT-B (recommended for most users)")
+    print("  5. ViT-H and ViT-B")
     choice = input("\nEnter choice (1-5): ").strip()
     return {"1": ["vit_h"], "2": ["vit_l"], "3": ["vit_b"],
             "4": ["vit_h", "vit_l", "vit_b"], "5": ["vit_h", "vit_b"]}.get(choice, [])

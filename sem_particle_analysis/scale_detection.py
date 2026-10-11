@@ -316,7 +316,11 @@ class ScaleDetector:
             if metadata_result:
                 self.last_detection = metadata_result
                 return metadata_result
-            raise ValueError("Metadata extraction failed and no fallback allowed")
+            # A TIFF that was read and found wanting has already raised with
+            # the reason; what is left is a file that was never read.
+            if file_path:
+                raise ValueError("not a TIFF, and only TIFF files record a pixel size")
+            raise ValueError("no file to read a pixel size from")
 
         # --- Try OCR ---
         if method in ('auto', 'ocr'):

@@ -19,10 +19,17 @@ CHECKPOINT_FILENAMES = {
     "vit_b": "sam_vit_b_01ec64.pth",
 }
 
-# Searched in order when no explicit path is given.
+# Searched in order when no explicit path is given: the directory named by
+# SAM_WEIGHTS_DIR, if set; the checkout's sam_weights/, which is where
+# download_sam_weights.py puts them; and sam_weights/ under the current directory,
+# for an install that does not live in the checkout.
 def _default_search_dirs():
-    repo_root = Path(__file__).resolve().parents[2]
-    return [repo_root / "sam_weights", Path.home() / "segment-anything" / "models"]
+    dirs = []
+    if os.environ.get("SAM_WEIGHTS_DIR"):
+        dirs.append(Path(os.environ["SAM_WEIGHTS_DIR"]).expanduser())
+    dirs.append(Path(__file__).resolve().parents[1] / "sam_weights")
+    dirs.append(Path.cwd() / "sam_weights")
+    return dirs
 
 
 def infer_model_type(path, default="vit_h"):
@@ -68,7 +75,7 @@ def discover_checkpoints(extra_dirs=None):
     ViT-B is the default rather than ViT-H because of how the app is used. The
     analyst judges and corrects every mask, so the model produces a starting
     point rather than an answer, and ViT-B gets there several times faster from
-    a 375 MB checkpoint instead of a 2.4 GB one. Over a folder of hundreds, the
+    a 358 MB checkpoint instead of a 2.4 GB one. Over a folder of hundreds, the
     wait for the larger encoder costs more than its extra accuracy returns —
     and it is one click away in the same list when a frame deserves it.
 

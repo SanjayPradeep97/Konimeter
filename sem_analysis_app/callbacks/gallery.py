@@ -98,6 +98,9 @@ def restore_session():
         return [], ""
 
     done = sum(1 for i in range(len(state.image_paths)) if state.is_processed(i))
-    return (create_image_gallery(),
-            f"✅ {len(state.image_paths)} images in this session"
-            + (f", {done} already analysed" if done else ""))
+    status = f"✅ {len(state.image_paths)} images in this session"
+    if done:
+        status += f", {done} already analysed"
+    if state.results_manager is not None:
+        status += f" | results in {state.results_manager.csv_file}"
+    return create_image_gallery(), status

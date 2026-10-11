@@ -171,27 +171,33 @@ def create_mask_overlay(image, mask, color=(255, 0, 0), alpha=0.4):
 
 def find_images_in_folder(folder_path, extensions=None):
     """
-    Find all image files in a folder.
+    Find the image files directly inside a folder.
+
+    Extensions are matched whatever their case: instruments write ``.TIF`` as
+    often as ``.tif``, and a case-sensitive match finds none of them on macOS or
+    Linux. Hidden files are skipped, because a Mac copying to an exFAT or FAT32
+    drive leaves a ``._name.tif`` beside every image, and those are not images.
 
     Args:
         folder_path (str): Path to folder
-        extensions (list, optional): List of extensions to search for.
+        extensions (list, optional): Extensions to accept, without the dot.
             Default: ['png', 'jpg', 'jpeg', 'tif', 'tiff']
 
     Returns:
         list: Sorted list of image file paths
     """
-    import glob
     import os
 
     if extensions is None:
         extensions = ['png', 'jpg', 'jpeg', 'tif', 'tiff']
+    wanted = {ext.lower().lstrip('.') for ext in extensions}
 
-    image_paths = []
-    for ext in extensions:
-        pattern = os.path.join(folder_path, f'*.{ext}')
-        image_paths.extend(glob.glob(pattern))
-
+    image_paths = [
+        entry.path for entry in os.scandir(folder_path)
+        if entry.is_file()
+        and not entry.name.startswith('.')
+        and os.path.splitext(entry.name)[1].lower().lstrip('.') in wanted
+    ]
     return sorted(image_paths)
 
 

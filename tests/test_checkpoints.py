@@ -20,7 +20,7 @@ def weights(tmp_path, monkeypatch):
     """A directory holding all three canonical checkpoints, plus a fragment.
 
     The default search directories are switched off so that a real checkpoint
-    in the repository's ``sam_weights/`` (there is one after running the demo)
+    in the repository's ``sam_weights/`` (there is one once weights are downloaded)
     cannot leak into the list being tested."""
     monkeypatch.setattr(model_module, "_default_search_dirs", lambda: [])
     for name in ("sam_vit_h_4b8939.pth", "sam_vit_l_0b3195.pth",

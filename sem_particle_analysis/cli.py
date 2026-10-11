@@ -23,7 +23,7 @@ import pandas as pd
 
 from . import modality, region
 from .analysis import ParticleAnalyzer
-from .model import SAMModel, discover_checkpoints, infer_model_type
+from .model import SAMModel, discover_checkpoints, infer_model_type, is_full_checkpoint
 from .scale_detection import ScaleDetector
 from .segmentation import ParticleSegmenter
 from .utils import find_images_in_folder, load_image
@@ -75,14 +75,44 @@ def _polarity(args, kind):
     return kind.dark_particles
 
 def _repo_root():
-    # cli.py -> sem_particle_analysis -> sem_particle_analysis -> repo root
-    return Path(__file__).resolve().parents[2]
+    # cli.py -> sem_particle_analysis -> repo root
+    return Path(__file__).resolve().parents[1]
 
 
 def find_checkpoint(model_type):
     """Locate SAM weights for ``model_type``, or return None."""
     return next((p for p in discover_checkpoints()
                  if infer_model_type(p, default=None) == model_type), None)
+
+
+def choose_model(checkpoint, model_type):
+    """
+    The weights to load and the architecture to load them as.
+
+    With neither given, the same default as the web app: the first complete
+    checkpoint found, ViT-B before the larger models. A checkpoint given alone
+    has its architecture read from the filename, because loading ViT-B weights
+    as ViT-H fails deep inside torch with an opaque shape error.
+
+    Returns:
+        tuple: (checkpoint path or None, model type or None, error message or None)
+    """
+    if checkpoint is not None:
+        inferred = infer_model_type(checkpoint, default=None)
+        if model_type and inferred and model_type != inferred:
+            return None, None, (f"--model-type {model_type} does not match "
+                                f"{Path(checkpoint).name}, which is {inferred}")
+        model_type = model_type or inferred
+        if model_type is None:
+            return None, None, (f"cannot tell the architecture from the name "
+                                f"{Path(checkpoint).name}; pass --model-type")
+        return checkpoint, model_type, None
+
+    if model_type is not None:
+        return find_checkpoint(model_type), model_type, None
+
+    found = next((p for p in discover_checkpoints() if is_full_checkpoint(p)), None)
+    return found, (infer_model_type(found, default=None) if found else None), None
 
 
 def sha256_file(path, chunk_size=1 << 20):
@@ -316,7 +346,7 @@ def analyze_image(image_path, sam_model, detector, args):
     }
 
 
-def write_plots(per_particle, out_dir, unit):
+def write_plots(per_particle, out_dir, unit, name_suffix=""):
     """Publication-ready size distributions at 300 dpi, in PNG and PDF."""
     import matplotlib
 
@@ -340,10 +370,30 @@ def write_plots(per_particle, out_dir, unit):
     fig.tight_layout()
 
     for suffix in ("png", "pdf"):
-        path = out_dir / f"size_distribution.{suffix}"
+        path = out_dir / f"size_distribution{name_suffix}.{suffix}"
         fig.savefig(path, dpi=300, bbox_inches="tight")
         written.append(path.name)
     plt.close(fig)
+    return written
+
+
+def write_distributions(per_particle, out_dir):
+    """
+    Size distributions, one per unit.
+
+    A frame whose scale could not be read is measured in pixels, and pooling
+    those with nanometres would put two incommensurable numbers on one axis
+    under whichever label came first. With a single unit the files keep their
+    plain names; with more, each name carries its unit.
+    """
+    if per_particle.empty:
+        return []
+    units = list(per_particle["unit"].unique())
+    written = []
+    for unit in units:
+        suffix = "" if len(units) == 1 else f"_{unit}"
+        written += write_plots(per_particle[per_particle["unit"] == unit],
+                               out_dir, unit, suffix)
     return written
 
 
@@ -358,8 +408,11 @@ def build_parser():
                         help="Directory for CSVs, plots and the provenance record")
 
     model = parser.add_argument_group("model")
-    model.add_argument("--model-type", default="vit_h",
-                       choices=["vit_b", "vit_h", "vit_l"])
+    model.add_argument("--model-type", default=None,
+                       choices=["vit_b", "vit_h", "vit_l"],
+                       help="SAM architecture (default: read from --checkpoint's "
+                            "name, else the ViT-B weights in sam_weights/, as in "
+                            "the app)")
     model.add_argument("--checkpoint", type=Path,
                        help="SAM weights (default: look in sam_weights/)")
     model.add_argument("--device", help="Force a device, e.g. cpu, mps, cuda")
@@ -395,13 +448,16 @@ def build_parser():
     analysis = parser.add_argument_group("analysis")
     analysis.add_argument("--min-size", type=int, default=30,
                           help="Discard particles smaller than this many pixels (default: 30)")
-    analysis.add_argument("--border-buffer", type=int, default=4)
+    analysis.add_argument("--border-buffer", type=int, default=4,
+                          help="Width in pixels of the strip along the frame edge "
+                               "cleared of mask before measuring (default: 4)")
     analysis.add_argument("--clear-edges", action="store_true",
                           help="Drop particles touching the frame edge; they are only "
                                "partly imaged, so their size is not a real measurement")
 
     output = parser.add_argument_group("output")
-    output.add_argument("--no-plots", action="store_true")
+    output.add_argument("--no-plots", action="store_true",
+                        help="Write the CSVs and run.json, but no size-distribution plots")
     output.add_argument("--no-checkpoint-hash", action="store_true",
                         help="Skip hashing the weights file (saves a few seconds)")
     return parser
@@ -422,11 +478,14 @@ def main(argv=None):
         print(f"error: no images found in {args.input}", file=sys.stderr)
         return 2
 
-    checkpoint = args.checkpoint or find_checkpoint(args.model_type)
+    checkpoint, model_type, problem = choose_model(args.checkpoint, args.model_type)
+    if problem:
+        print(f"error: {problem}", file=sys.stderr)
+        return 2
     if checkpoint is None or not Path(checkpoint).exists():
         print(
-            f"error: no {args.model_type} weights found. Pass --checkpoint, or run:\n"
-            f"    python download_sam_weights.py",
+            f"error: no {model_type or 'SAM'} weights found. Pass --checkpoint, or run:\n"
+            f"    python download_sam_weights.py --model {model_type or 'vit_b'}",
             file=sys.stderr,
         )
         return 2
@@ -434,7 +493,8 @@ def main(argv=None):
     args.output.mkdir(parents=True, exist_ok=True)
     print(f"Analysing {len(image_paths)} image(s) -> {args.output}")
 
-    sam_model = SAMModel(str(checkpoint), model_type=args.model_type, device=args.device)
+    print(f"Model: {model_type} from {checkpoint}")
+    sam_model = SAMModel(str(checkpoint), model_type=model_type, device=args.device)
     detector = ScaleDetector(use_gpu=False)
 
     per_particle_rows = []
@@ -518,9 +578,8 @@ def main(argv=None):
     per_image.to_csv(args.output / "per_image_summary.csv", index=False)
 
     plots = []
-    if not args.no_plots and not per_particle.empty:
-        unit = per_particle["unit"].iloc[0]
-        plots = write_plots(per_particle, args.output, unit)
+    if not args.no_plots:
+        plots = write_distributions(per_particle, args.output)
 
     provenance = {
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -529,7 +588,7 @@ def main(argv=None):
         "versions": _versions(),
         "device": str(sam_model.device),
         "model": {
-            "type": args.model_type,
+            "type": model_type,
             "checkpoint": str(Path(checkpoint).resolve()),
             "sha256": None if args.no_checkpoint_hash else sha256_file(checkpoint),
         },

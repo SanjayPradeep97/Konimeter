@@ -58,3 +58,6 @@ results/figures/*.pdf
 yolo*.pt
 *.part
 demo/images/**/*.tif
+
+# Default output folder of sem-analyze, when run from the repository root.
+/analysis_output/

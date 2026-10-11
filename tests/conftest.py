@@ -9,11 +9,11 @@ import pytest
 # Test helpers live alongside the tests rather than in the installed package.
 sys.path.insert(0, str(Path(__file__).parent))
 # The library under test, taken from this checkout rather than from whatever is
-# installed. Both apps import sem_particle_analysis by name, and a development
-# install resolves that name to the directory pip was pointed at — which inside
-# a git worktree is the *other* checkout. Without this the suite silently
-# exercises code that is not the code being changed, and a new argument to a
-# library function comes back as "unexpected keyword argument".
+# installed. Everything here imports sem_particle_analysis by name, and a
+# development install resolves that name to the directory pip was pointed at —
+# which inside a git worktree is the *other* checkout. Without this the suite
+# silently exercises code that is not the code being changed, and a new argument
+# to a library function comes back as "unexpected keyword argument".
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
@@ -63,11 +63,10 @@ def _ensure_usable_temp_root():
 
 _ensure_usable_temp_root()
 
-# Candidate locations for SAM weights, in preference order. sam_weights/ is the
-# documented location; the others cover a checkout that hasn't run the downloader.
+# Where download_sam_weights.py puts SAM weights. SAM_CHECKPOINT names a file
+# elsewhere.
 _WEIGHT_DIRS = [
     Path(__file__).parent.parent / "sam_weights",
-    Path.home() / "segment-anything" / "models",
 ]
 _WEIGHT_FILES = {
     "vit_b": "sam_vit_b_01ec64.pth",

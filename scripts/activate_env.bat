@@ -5,13 +5,14 @@ REM The environment is SEM_analysis, the one the README sets up. Set SEM_ENV
 REM before running to use a different one.
 REM
 REM Conda is found wherever it was installed: through CONDA_EXE when started
-REM from an Anaconda Prompt, otherwise in the usual install folders.
+REM from an Anaconda Prompt, otherwise in the usual Anaconda, Miniconda and
+REM Miniforge install folders.
 
 if not defined SEM_ENV set "SEM_ENV=SEM_analysis"
 
 set "CONDA_ROOT="
 if defined CONDA_EXE for %%I in ("%CONDA_EXE%\..\..") do set "CONDA_ROOT=%%~fI"
-for %%D in ("%USERPROFILE%\anaconda3" "%USERPROFILE%\miniconda3" "%LOCALAPPDATA%\anaconda3" "%LOCALAPPDATA%\miniconda3" "%ProgramData%\anaconda3" "%ProgramData%\miniconda3") do (
+for %%D in ("%USERPROFILE%\anaconda3" "%USERPROFILE%\miniconda3" "%USERPROFILE%\miniforge3" "%LOCALAPPDATA%\anaconda3" "%LOCALAPPDATA%\miniconda3" "%LOCALAPPDATA%\miniforge3" "%ProgramData%\anaconda3" "%ProgramData%\miniconda3" "%ProgramData%\miniforge3") do (
     if not defined CONDA_ROOT if exist "%%~D\Scripts\activate.bat" set "CONDA_ROOT=%%~D"
 )
 if not defined CONDA_ROOT (

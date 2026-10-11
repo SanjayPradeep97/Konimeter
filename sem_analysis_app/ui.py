@@ -1,13 +1,13 @@
 """
 Gradio interface definition: tabs, controls and event wiring.
 
-Five tabs, in the order the work happens: set up, choose an image, settle the
-frame, find the particles, read the numbers.
+Six tabs, in the order the work happens: set up, choose an image, settle the
+frame, find the particles, read the numbers, plot them.
 
 Segmentation and refinement share a tab because they are one task — you judge a
-mask by correcting it, and splitting them meant hopping between tabs for every
-image in a folder of hundreds. Scale lives on exactly one tab for the same
-reason it did before: two places to set it meant two answers.
+mask by correcting it, and splitting them would mean hopping between tabs for
+every image in a folder of hundreds. Scale lives on exactly one tab, because two
+places to set it would mean two answers.
 """
 import gradio as gr
 
@@ -18,7 +18,6 @@ from .callbacks import (
     # setup + gallery
     initialize_sam,
     load_images_from_folder,
-    resume_session,
     restore_session,
     select_image_from_gallery,
     # scale and frame
@@ -173,30 +172,36 @@ def create_interface():
                     with gr.Column():
                         gr.Markdown("### 2 · Images", elem_classes=["step-title"])
                         gr.Markdown(
-                            "Select the images from **one sample folder**. "
-                            "Results are written next to them, so each folder "
-                            "keeps its own CSV."
+                            "Paste the path of **one sample folder**. Every image "
+                            "in it is opened, and results are saved to "
+                            "`analysis_results.csv` in that folder. Open the "
+                            "folder again later to carry on where you left off."
                         )
-                        file_input = gr.File(
-                            label="Image files",
-                            file_count="multiple",
-                            file_types=[".tif", ".tiff", ".png", ".jpg", ".jpeg"],
-                            type="filepath",
+                        # A path rather than an upload: an uploaded file reaches
+                        # the app as a copy in Gradio's temporary cache, so the
+                        # results would have been saved there too.
+                        folder_input = gr.Textbox(
+                            label="Image folder",
+                            max_lines=1,
+                            placeholder=r"C:\Data\Sample A   or   /Users/me/Data/Sample A",
+                            info="To copy a folder's path: in File Explorer, "
+                                 "Shift + right-click it → Copy as path; in "
+                                 "Finder, select it and press ⌥⌘C.",
                         )
+                        with gr.Accordion("Save results somewhere else", open=False):
+                            results_file_input = gr.Textbox(
+                                label="Results file",
+                                max_lines=1,
+                                placeholder="Leave empty to use analysis_results.csv "
+                                            "in the image folder",
+                                info="For a folder you cannot write to, or to keep "
+                                     "adding to a results file from an earlier "
+                                     "session. A folder here gets its own "
+                                     "analysis_results.csv.",
+                            )
                         load_btn = gr.Button("📁 Load images", variant="primary",
                                              size="lg", interactive=False)
                         load_status = gr.Textbox(label="Status", interactive=False)
-
-                with gr.Accordion("Resume a previous session", open=False):
-                    gr.Markdown(
-                        "Point at an earlier results CSV to keep adding to it. "
-                        "Images already in it come back ticked in the gallery."
-                    )
-                    resume_csv_input = gr.File(label="Results CSV",
-                                               file_count="single",
-                                               file_types=[".csv"], type="filepath")
-                    resume_btn = gr.Button("📂 Resume", variant="secondary")
-                    resume_status = gr.Textbox(label="Status", interactive=False)
 
             # ============================================================
             # TAB 1: Gallery
@@ -532,10 +537,9 @@ def create_interface():
         # ---- Setup ----
         init_sam_btn.click(initialize_sam, inputs=[sam_file],
                            outputs=[init_status, load_btn])
-        load_btn.click(load_images_from_folder, inputs=[file_input],
+        load_btn.click(load_images_from_folder,
+                       inputs=[folder_input, results_file_input],
                        outputs=[load_status, gallery])
-        resume_btn.click(resume_session, inputs=[resume_csv_input],
-                         outputs=[resume_status, gallery, load_status])
 
         # A refresh reconnects to the same process-wide session, so bring the
         # gallery back rather than showing an empty one.

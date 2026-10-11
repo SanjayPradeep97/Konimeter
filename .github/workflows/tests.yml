@@ -1,0 +1,44 @@
+name: tests
+
+on:
+  push:
+    branches: [main, publication]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  fast:
+    # The suite without SAM weights or OCR models, installed as the README
+    # describes, on every platform the app is used on.
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11"]
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+          - os: ubuntu-latest
+            python: "3.12"
+    env:
+      KMP_DUPLICATE_LIB_OK: "TRUE"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install PyTorch (CPU)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            pip install torch torchvision
+          else
+            pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          fi
+      - name: Install the package
+        run: pip install -e . pytest
+      - name: Run the tests
+        run: pytest -m "not slow"
