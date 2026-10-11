@@ -1,5 +1,7 @@
 # Quantification and Classification of Carbon Nanotubes in Electron Micrographs using Vision Foundation Models
 
+[![tests](https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/actions/workflows/tests.yml/badge.svg?branch=publication)](https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/actions/workflows/tests.yml?query=branch%3Apublication)
+
 Code, results and reproduction scripts for the paper of that title (Pradeep,
 Wang, Dahm, Eldredge & Tsai; *Scientific Reports*, under review). This branch
 (`publication`) is written for someone who has the paper open and wants to
