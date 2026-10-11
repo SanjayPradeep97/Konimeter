@@ -5,6 +5,8 @@ None of this needs OCR, which is the point: metadata is what succeeds on most
 instrument exports, and it must not be gated on a heavy optional dependency.
 """
 
+import sys
+
 import numpy as np
 import pytest
 
@@ -146,9 +148,12 @@ class TestDetectScaleDispatch:
         with pytest.raises(ValueError):
             detector.detect_scale(image, file_path=str(path), method="metadata")
 
-    def test_auto_mode_prefers_metadata_without_needing_ocr(self, detector, tmp_path):
+    def test_auto_mode_prefers_metadata_without_needing_ocr(self, detector, tmp_path,
+                                                             monkeypatch):
         # With EasyOCR absent, auto mode must still succeed off metadata rather
-        # than dying on the import.
+        # than dying on the import. Made absent here, so that the test neither
+        # depends on the install nor downloads OCR models where it is installed.
+        monkeypatch.setitem(sys.modules, "easyocr", None)
         path = write_tiff(tmp_path / "fei.tif", description="[Scan]\nPixelWidth=2.5e-9\n")
         image = np.zeros((64, 64, 3), dtype=np.uint8)
         result = detector.detect_scale(image, file_path=str(path), method="auto")
