@@ -19,8 +19,9 @@ demo\run_demo.bat                          :: Windows
 ```
 
 ```bash
-conda env create -f environment.yml        # once, at the repo root
-bash demo/run_demo.sh                      # Linux / macOS
+conda env create -f environment.yml        # once, at the repo root; on macOS or
+                                           # without an NVIDIA GPU, environment-cpu.yml
+./demo/run_demo.sh                         # Linux / macOS
 ```
 
 The launcher activates the `cnt-vfm` environment, downloads the SAM ViT-B
@@ -86,7 +87,7 @@ in the radio button for comparison.
 Driving the page programmatically with one positive click per image, placed
 at the deepest interior point of the expert mask and then displaced by 8 and
 15 px in eight directions to imitate an imprecise click (60 images, 17 clicks
-each):
+each; the script that drove these runs is not part of this branch):
 
 | mask rule | click exactly inside | 8 px off | 15 px off | median IoU with the expert mask |
 |---|---|---|---|---|

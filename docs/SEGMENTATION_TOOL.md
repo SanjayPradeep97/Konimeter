@@ -11,27 +11,36 @@ classification dataset.
 
 ## Install
 
+From the repository root, with [Miniconda or Anaconda](https://docs.conda.io/en/latest/miniconda.html)
+and Git installed (Python 3.10 to 3.12 work):
+
 ```bash
 conda create -n SEM_analysis python=3.11
 conda activate SEM_analysis
+
+# PyTorch first. NVIDIA GPU:
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# or Apple Silicon, or no GPU:
+pip install torch torchvision
+
 pip install -e .
 ```
 
-The PyTorch line is the one that varies. Use the `cu128` index for an NVIDIA
-card, `conda install pytorch torchvision -c pytorch` on Apple Silicon, and add
-`cpuonly` for a machine without a GPU. The environment is kept separate from the
-classification half because EasyOCR pins its own PyTorch.
+PyTorch goes in before the package: EasyOCR depends on it, and if it is not
+already there pip fetches the default build, which on Windows is CPU-only. The
+environment is kept separate from the classification half because EasyOCR pins
+its own PyTorch.
 
 Then fetch a SAM checkpoint into `sam_weights/`:
 
 ```bash
-python download_sam_weights.py --model vit_h
+python download_sam_weights.py --model vit_b          # 358 MB, what the app loads first
+python download_sam_weights.py --model vit_b vit_h    # also ViT-H, 2.4 GB
 ```
 
-`vit_h` is 2.4 GB and is what the paper used; `vit_b` is 358 MB and faster. With
-no `--model` the script asks. A GPU segments an image in one to three seconds, a
-CPU in ten to thirty.
+The paper used ViT-H, which can be picked in the app once downloaded; ViT-B is
+several times faster and the default. With no `--model` the script asks. A GPU
+segments an image in one to three seconds, a CPU in ten to thirty.
 
 ## Run the application
 
@@ -44,6 +53,19 @@ It serves `http://127.0.0.1:7860`. `--port` and `--host` change where it
 listens. The app keeps a single process-wide state object, so it is built for
 one analyst at a time; two browser tabs pointed at the same server share one
 session.
+
+The tabs, in the order they are used:
+
+| Tab | What happens there |
+| --- | --- |
+| ⚙️ Setup | Load a SAM checkpoint, then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it. A results file elsewhere can be named instead |
+| 🖼️ Gallery | Pick an image. Ticked images already have saved results |
+| 📏 Scale & Frame | Establish the scale (below), and check what the app decided about the instrument and the analysable area |
+| 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include and exclude clicks. Every click and every applied change can be undone |
+| 💾 Results | The measurements per image, and the whole folder's results: delete rows, remove duplicates, export |
+| 📊 Plots | Size distributions across everything saved |
+
+The masks of the classification dataset were made on the Segment & Refine tab.
 
 Module layout:
 
@@ -128,16 +150,25 @@ detector can read pixel size straight from vendor metadata, which is exact.
 
 | Flag | Effect |
 | --- | --- |
+| `-o DIR` | Where the outputs go (default `analysis_output/`) |
+| `--checkpoint PATH` | Use this weights file instead of looking in `sam_weights/` |
+| `--model-type vit_b\|vit_l\|vit_h` | The SAM architecture. Default: read from the checkpoint's name, else the ViT-B weights in `sam_weights/`, as in the app |
+| `--device cpu\|mps\|cuda` | Force a device (default: the GPU if there is one) |
 | `--scale-nm-per-px X` | Fix the scale instead of detecting it per image |
 | `--scale-method metadata\|ocr\|auto` | How to establish scale (default `auto`) |
 | `--clear-edges` | Drop particles touching the frame; they are only partly imaged |
 | `--min-size N` | Ignore particles below N pixels (default 30) |
+| `--border-buffer N` | Clear an N-pixel strip along the frame edge before measuring (default 4) |
 | `--crop-percent P` | Override databar removal (default: measure it) |
-| `--model-type vit_b` | Faster, lower quality than the default `vit_h` |
 | `--modality SEM\|TEM` | Force the instrument kind (default: read it from the file) |
 | `--particles bright\|dark` | Force particle polarity (default: follow the modality) |
 | `--max-nm-per-px X` | Skip frames coarser than this, magnifications too low to resolve particles |
 | `--min-nm-per-px X` | Skip frames finer than this |
+| `--no-plots`, `--no-checkpoint-hash` | Skip the plots; skip hashing the weights into `run.json` |
+
+When some frames had no readable scale and were measured in pixels, there is
+one size distribution per unit (`size_distribution_nm.*`,
+`size_distribution_pixels.*`) rather than one that mixes the two.
 
 Batch mode uses the automatic pipeline only, with no interactive refinement, and
 picks its mask candidate by heuristic. The chosen mask and the rejected
@@ -150,9 +181,10 @@ from sem_particle_analysis import SAMModel, ScaleDetector, ParticleSegmenter, Pa
 from sem_particle_analysis.utils import load_image
 
 image = load_image("micrograph.tif")
-scale = ScaleDetector().detect_scale_bar(image)          # nm per pixel
+# Pixel size from the file's metadata, else read off the printed scale bar.
+scale = ScaleDetector().detect_scale(image, file_path="micrograph.tif")
 
-segmenter = ParticleSegmenter(SAMModel("sam_weights/sam_vit_h_4b8939.pth", model_type="vit_h"))
+segmenter = ParticleSegmenter(SAMModel("sam_weights/sam_vit_b_01ec64.pth", model_type="vit_b"))
 segmenter.segment_image(image)
 segmenter.select_mask()                                   # highest-scoring candidate
 
@@ -166,9 +198,10 @@ print(n, analyzer.get_measurements(in_nm=True))
 takes point prompts. `ResultsManager` accumulates per-image measurements and
 writes the CSV.
 
-## Optional dependencies
+## What needs EasyOCR and Gradio
 
-Only two parts of the toolkit need the heavy optional stack:
+`pip install -e .` installs both, but the library imports neither until it is
+needed, so it also works in an environment that lacks them:
 
 | Dependency | Needed for | Without it |
 | --- | --- | --- |
@@ -182,7 +215,7 @@ metadata-only run never pays for them.
 ## Tests
 
 ```bash
-pytest                      # everything
+pytest                      # everything, including a run of SAM itself
 pytest -m "not slow"        # skip tests needing model weights or OCR
 ```
 

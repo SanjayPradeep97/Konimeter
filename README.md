@@ -39,6 +39,14 @@ particle, SAM masks it, the classifier labels it. `demo/run_demo.bat` (or
 
 ## Install
 
+```bash
+git clone -b publication https://github.com/SanjayPradeep97/SAM-SEM-Segmentation.git
+cd SAM-SEM-Segmentation
+```
+
+(The repository's default branch, `main`, holds only the segmentation tool, for
+general use; everything for the paper is on this branch.)
+
 Two conda environments, one per half of the project.
 
 **Classification pipeline, baseline and demo** (`cnt-vfm`):
@@ -55,9 +63,11 @@ python classification/check_env.py
 Gradio and is kept separate because EasyOCR pins its own PyTorch.
 
 The CUDA file pins the `+cu128` PyTorch build so an RTX 50-series card works
-(an unpinned `torch` resolves to a CPU-only wheel); the CPU file takes PyTorch
-from PyPI. The demo, the statistics, the tables and the tests run on CPU;
-re-extracting features and re-running the benchmark want a GPU.
+(an unpinned `torch` resolves to a CPU-only wheel); the CPU file takes PyTorch,
+torchvision and XGBoost from conda-forge, so that they share one OpenMP runtime
+(from PyPI, the two runtimes crash the Luo baseline on macOS). The demo, the
+statistics, the tables and the tests run on CPU; re-extracting features and
+re-running the benchmark want a GPU.
 
 ## Data
 
@@ -103,8 +113,9 @@ location; `classification/cnt_paths.py` is the single place paths are resolved.
 **Masks.** The 1,785 masks were made with the segmentation tool in this
 repository. The 60 that belong to the demo images are in `demo/masks/`; the
 full set is distributed with the paper's data archive rather than in this
-branch. Any mask can be regenerated with the tool (`docs/SEGMENTATION_TOOL.md`,
-"Interactive refinement") or with the demo, which makes masks live. The
+branch. Any mask can be regenerated with the tool's Segment & Refine tab
+(`docs/SEGMENTATION_TOOL.md`, "Run the application") or with the demo, which
+makes masks live. The
 classification pipeline refuses to run if a mask is missing, and says so.
 
 The SEM images of Table 1 were acquired under a collaboration that does not
@@ -118,11 +129,17 @@ set CNT_BASE=<data root>
 reproduce.bat
 ```
 
+```bash
+conda activate cnt-vfm
+export CNT_BASE=<data root>
+./reproduce.sh                  # Linux / macOS
+```
+
 What it does, and how long it takes on an RTX 5080:
 
 | step | what | time |
 |---|---|---|
-| 0 | environment check; assert `encoder_bench.py` and `paper_results.py` agree on every feature-cache name | 20 s |
+| 0 | environment check; fetch the SAM ViT-B checkpoint for Figure 7 if missing (358 MB, once); assert `encoder_bench.py` and `paper_results.py` agree on every feature-cache name | 20 s |
 | 1–2 | extract features for 8 encoders (benchmark geometry) and DINOv2 (manuscript geometry) | ~10 min first time, seconds afterwards |
 | 3 | 108 frozen probes, 10 fine-tuned baselines, statistics | ~3 h; **skipped while `results/analysis.json` exists** (`--force` recomputes) |
 | 4 | epoch-budget sweep | 3 min |
@@ -156,16 +173,18 @@ python classification/verify_manuscript.py
 | Figs. 1, 2, 3, 5 (image mosaics, architecture diagram, misclassified examples) | figures from the original submission, assembled by hand or with notebooks that are not part of this branch | |
 | Fig. 4 (test confusion matrix) | `classification/figures/make_confusion.py` | `results/per_image_probe.json` |
 | Fig. 6 (DINOv2 activation mosaic) | figure from the original submission, produced with notebooks that are not part of this branch; unchanged in revision | |
-| Fig. 7 (SAM activation mosaic) and the 1.05 / 0.97 ratios in its caption | `classification/figures/make_sam_mosaic.py`, `neck_inversion.py` | four micrographs + masks, SAM ViT-B checkpoint |
+| Fig. 7 (SAM activation mosaic) | `classification/figures/make_sam_mosaic.py` | four micrographs + masks, SAM ViT-B checkpoint |
+| the 1.05 / 0.97 ratios in the Fig. 7 caption | `classification/figures/neck_inversion.py`, run by hand; not part of `reproduce.bat` | the same four micrographs, which are training images, so their masks come from the data archive rather than `demo/masks/` |
 | Fig. 8 (t-SNE of the test set) | `classification/figures/make_tsne.py` | DINOv2 manuscript-geometry feature cache |
 | Fig. 9 (composite multi-particle demo) | figure from the original submission, produced with the segmentation tool and notebooks that are not part of this branch | |
 | headline 89.5 % ± 1.0 % CV, 92.7 % (166/179) test, CI 88.0–95.7 % | `classification/paper_results.py --stages analyse` | `results/analysis.json` → `headline` |
 | "108 configurations, 80.8 % to 89.7 %, mean 86.6 % ± 2.0 %" | `verify_manuscript.py` derives them | `results/results_probes.csv` |
 | mask effect: 54/54 pairs, +2.48 pp, sign test, *t* = 17.8 | `classification/analyse.py::mask_effect` | `results/analysis.json` → `mask_effect` |
 | every *p* value (exact McNemar, Holm over 117 tests) | `classification/analyse.py::compare_all` | `results/analysis.json` → `comparisons` |
-| fine-tuned baselines and the 4.3–9.0 pp margin | `paper_results.py --stages finetune` | `results/results_finetune.csv`, `results/per_image_finetune.json` |
+| fine-tuned baselines | `paper_results.py --stages finetune` | `results/results_finetune.csv`, `results/per_image_finetune.json` |
+| the 4.3–9.0 pp margin over them | `verify_manuscript.py` derives it | `results/analysis.json`, `results/results_finetune.csv` |
 | Luo et al. row | `baseline/run_all.py`, selected by `classification/luo_results.py` | `baseline/results/` |
-| Supplementary S2 (layer ablation), S3 (MLP sweep), S5 (CLS token) | notebooks from the original submission, not part of this branch and not re-run in revision | |
+| Supplementary Notes S2 (layer ablation), S3 (MLP sweep), S5 (CLS token) | notebooks from the original submission, not part of this branch and not re-run in revision | |
 | Supplementary Table S3 (all 108 configurations) | `results/results_probes.csv` directly | |
 | epoch-budget check | `classification/epoch_sweep.py` | `results/epoch_sweep.json` |
 
@@ -185,8 +204,8 @@ goes through: frozen probes, fine-tuned networks and the VLAD baseline alike.
 * **Early stopping uses an inner split only.** Each fold model trains on 90 %
   of its training folds and stops on the remaining 10 %; the held-out fold and
   the test set are never a stopping monitor. `_guarded()` enforces this on
-  every call; `test_protocol.py` and `mutants.py` re-inject seven bugs of this
-  kind and show each is caught.
+  every call; `mutants.py` re-injects seven bugs of this kind and shows that
+  `test_protocol.py` catches each one.
 * **Scalers are fit on training rows only.**
 * **Caches are keyed by split** (and by geometry, pyramid input size, a
   random-weights flag and any checkpoint override), so features of one split
@@ -203,7 +222,7 @@ pytest -m "not slow"                        # segmentation library and apps, und
 pytest                                       # + the tests that need SAM weights and EasyOCR (segmentation-tool env)
 cd classification
 python test_protocol.py                      # 42 checks on the protocol (needs one feature cache)
-python mutants.py                            # re-injects 7 audited bugs; all must be caught
+python mutants.py                            # re-injects 7 audited bugs; all must be caught (needs the same cache)
 python test_yolo_adapter.py                  # no GPU or images needed
 python test_cache.py
 python check_data.py                         # is every image and mask of the split present under CNT_BASE?
@@ -218,5 +237,8 @@ pixel-identical to the Dataverse originals.
 
 See [`CITATION.cff`](CITATION.cff). The segmentation tool builds on Segment
 Anything (Kirillov et al., 2023); the classifier on DINOv2 (Oquab et al.,
-2023). Licence: MIT ([`LICENSE`](LICENSE)). The images are CC BY-NC 4.0 and
-belong to their depositors.
+2023).
+
+The code is MIT-licensed ([`LICENSE`](LICENSE)). The micrographs and masks
+under `demo/` are not: they are CC BY-NC 4.0, non-commercial use only, and the
+images belong to their depositors ([`demo/ATTRIBUTION.md`](demo/ATTRIBUTION.md)).

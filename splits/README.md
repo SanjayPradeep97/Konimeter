@@ -13,7 +13,9 @@
 
 Stratified 80/10/10; each class contributes 10.0–10.1 % of its images to test.
 The classes are not balanced, 430 to 462 per class, a 7.4 % spread. Fiber is the
-limiting class: the collection holds 434 fiber images and 430 are used.
+smallest class: 412 of its 430 images are among the 442 fiber images in the
+Dataverse record, and the other 18 are from the same collection but not in the
+record (`not_on_dataverse.csv`).
 
 ## How the protocol uses it
 

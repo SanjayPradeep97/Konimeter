@@ -2,8 +2,9 @@
 
 The 60 micrographs in `demo/images/` are redistributed from
 
-> *Dataset of TEM Images for Carbon Nanomaterial Classification*, Harvard
-> Dataverse, <https://doi.org/10.7910/DVN/5O0SF7>, licensed
+> Wang, Chen (National Institute for Occupational Safety and Health), 2024.
+> *Dataset of TEM Images for Carbon Nanomaterial Classification*. Harvard
+> Dataverse, V1, <https://doi.org/10.7910/DVN/5O0SF7>, licensed
 > **CC BY-NC 4.0** (<https://creativecommons.org/licenses/by-nc/4.0/>).
 
 They are unmodified in content: each file is the original 8-bit greyscale
