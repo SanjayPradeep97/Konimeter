@@ -1,8 +1,6 @@
 @echo off
-REM Activate the conda environment run_app.bat runs in.
-REM
-REM The environment is SEM_analysis, the one the README sets up. Set SEM_ENV
-REM before running to use a different one.
+REM Activate a conda environment: SEM_analysis, the one the README sets up for
+REM run_app.bat, unless SEM_ENV names another.
 REM
 REM Conda is found wherever it was installed: through CONDA_EXE when started
 REM from an Anaconda Prompt, otherwise in the usual Anaconda, Miniconda and

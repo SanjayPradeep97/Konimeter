@@ -1,5 +1,7 @@
 # SAM-SEM Segmentation
 
+[![tests](https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/actions/workflows/tests.yml)
+
 Segment and measure particles in SEM and TEM micrographs with Meta's
 [Segment Anything Model](https://segment-anything.com/) (SAM): a web app for
 interactive analysis, and a command-line tool for running the same pipeline over
