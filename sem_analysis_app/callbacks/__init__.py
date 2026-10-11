@@ -1,8 +1,10 @@
 """Gradio callbacks, grouped by the tab they serve."""
 
 from .setup import (
+    current_save_dataset,
     initialize_sam,
     load_images_from_folder,
+    set_save_dataset,
 )
 from .gallery import (
     create_image_gallery,
@@ -62,12 +64,12 @@ from .results import (
 )
 
 __all__ = [
-    "apply_refinement_changes",
     "accept_from_work_tab",
+    "apply_refinement_changes",
     "apply_two_points",
-    "check_outputs",
     "auto_process_current_image",
     "check_and_remove_duplicates",
+    "check_outputs",
     "clear_all_particles",
     "clear_crop_override",
     "clear_edge_particles",
@@ -75,6 +77,7 @@ __all__ = [
     "clear_scale",
     "confirm_scale",
     "create_image_gallery",
+    "current_save_dataset",
     "delete_result_row",
     "export_results",
     "frame_header",
@@ -102,6 +105,7 @@ __all__ = [
     "set_modality",
     "set_particle_polarity",
     "set_point_type",
+    "set_save_dataset",
     "skip_to_next",
     "toggle_particle_numbers",
     "undo_last_action",

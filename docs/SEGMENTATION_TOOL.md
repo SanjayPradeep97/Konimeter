@@ -69,6 +69,14 @@ The tabs, in the order they are used:
 
 The masks of the classification dataset were made on the Segment & Refine tab.
 
+Saving a frame also keeps it, with its corrected mask, in `konimeter_dataset/`
+beside the results file: `images/<stem>.png`, `masks/<stem>_mask.png` in the
+same 0/255 format as the paper's masks, a 16-bit instance-label image whose
+label *i* is the *i*-th particle of the frame's results row, the analysable-area
+mask, and an `index.csv` recording where each frame came from. Analysing a
+folder therefore also builds training data for the classifier. A switch on the
+Setup tab turns it off.
+
 Module layout:
 
 ```

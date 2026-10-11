@@ -19,6 +19,8 @@ from .callbacks import (
     initialize_sam,
     load_images_from_folder,
     restore_session,
+    current_save_dataset,
+    set_save_dataset,
     select_image_from_gallery,
     # scale and frame
     accept_from_work_tab,
@@ -202,6 +204,15 @@ def create_interface():
                         load_btn = gr.Button("📁 Load images", variant="primary",
                                              size="lg", interactive=False)
                         load_status = gr.Textbox(label="Status", interactive=False)
+                        save_dataset_box = gr.Checkbox(
+                            value=True,
+                            label="Also keep each saved image and its mask as training data",
+                            info="Written to konimeter_dataset/ beside the results "
+                                 "file: the frame, its corrected mask and a record "
+                                 "of how it was made, ready for training a "
+                                 "classifier or fine-tuning segmentation. Nothing "
+                                 "leaves this computer.",
+                        )
 
             # ============================================================
             # TAB 1: Gallery
@@ -540,10 +551,13 @@ def create_interface():
         load_btn.click(load_images_from_folder,
                        inputs=[folder_input, results_file_input],
                        outputs=[load_status, gallery])
+        save_dataset_box.change(set_save_dataset, inputs=[save_dataset_box],
+                                outputs=[save_dataset_box])
 
         # A refresh reconnects to the same process-wide session, so bring the
         # gallery back rather than showing an empty one.
         app.load(restore_session, outputs=[gallery, load_status])
+        app.load(current_save_dataset, outputs=[save_dataset_box])
 
         # ---- Gallery ----
         gallery.select(
