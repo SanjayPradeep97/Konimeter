@@ -125,9 +125,9 @@ def create_interface():
     Theme and CSS are applied at launch (see __main__), which is where Gradio 6
     expects them; passing them to Blocks is deprecated.
     """
-    with gr.Blocks(title="Particle Analysis — SEM & TEM") as app:
+    with gr.Blocks(title="Konimeter") as app:
 
-        gr.Markdown("# 🔬 Particle Analysis for SEM & TEM")
+        gr.Markdown("# 🔬 Konimeter · particle analysis for SEM & TEM")
         gr.Markdown(
             "Size and count particles in electron micrographs. Scale, instrument "
             "and analysable area are worked out per image; you judge the mask and "

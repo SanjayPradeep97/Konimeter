@@ -1,9 +1,10 @@
-# The segmentation tool
+# The segmentation tool (Konimeter)
 
 Segmentation and measurement of particles in electron micrographs, built on
-Meta's Segment Anything Model. There are two ways in: a Gradio application for
-working through images one at a time, and `sem-analyze` for running a folder
-headless. Both sit on the `sem_particle_analysis` library, which can also be
+Meta's Segment Anything Model, and developed further as
+[Konimeter](https://github.com/SanjayPradeep97/Konimeter) on the main branch.
+There are two ways in: a Gradio application for working through images one at a
+time, and `konimeter-batch` for running a folder headless. Both sit on the `sem_particle_analysis` library, which can also be
 imported directly.
 
 This is the tool that produced Table 1 of the paper and every mask in the
@@ -15,8 +16,8 @@ From the repository root, with [Miniconda or Anaconda](https://docs.conda.io/en/
 and Git installed (Python 3.10 to 3.12 work):
 
 ```bash
-conda create -n SEM_analysis python=3.11
-conda activate SEM_analysis
+conda create -n konimeter python=3.11
+conda activate konimeter
 
 # PyTorch first. NVIDIA GPU:
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
@@ -45,7 +46,8 @@ segments an image in one to three seconds, a CPU in ten to thirty.
 ## Run the application
 
 ```bash
-python -m sem_analysis_app       # from the repository root
+konimeter                        # in the activated environment
+python -m sem_analysis_app       # the same
 run_app.bat                      # Windows, activates the conda env first
 ```
 
@@ -140,8 +142,10 @@ how it was obtained, all parameters, library versions and the git revision, so a
 result can be traced back to exactly what produced it.
 
 ```bash
-sem-analyze path/to/images -o path/to/output --clear-edges
+konimeter-batch path/to/images -o path/to/output --clear-edges
 ```
+
+`sem-analyze`, the command's earlier name, still works.
 
 Outputs: `particles.csv` (one row per particle), `per_image_summary.csv`,
 `size_distribution.png/.pdf` at 300 dpi, and `run.json`. Input may be `.tif`,
@@ -206,7 +210,7 @@ needed, so it also works in an environment that lacks them:
 | Dependency | Needed for | Without it |
 | --- | --- | --- |
 | `easyocr` | Reading a printed scale bar (tier 2) | Scale from metadata or by hand still works; OCR raises `OCRUnavailableError` explaining the fix |
-| `gradio` | The web app | The library and `sem-analyze` are unaffected |
+| `gradio` | The web app | The library and `konimeter-batch` are unaffected |
 
 Importing `sem_particle_analysis` pulls in neither. EasyOCR's models load on
 first OCR use rather than when a `ScaleDetector` is constructed, so a

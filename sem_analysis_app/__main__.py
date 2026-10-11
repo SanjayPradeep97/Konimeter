@@ -1,5 +1,5 @@
 """
-Launch the web application:  python -m sem_analysis_app
+Launch the web application:  konimeter   (or python -m sem_analysis_app)
 """
 
 import argparse
@@ -14,8 +14,9 @@ SCALE_JS = (Path(__file__).parent / "static" / "scale_canvas.js").read_text()
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="sem_analysis_app",
-                                     description="SEM particle analysis web app")
+    parser = argparse.ArgumentParser(prog="konimeter",
+                                     description="Konimeter: particle analysis of SEM and TEM "
+                                                 "micrographs, in the browser")
     parser.add_argument("--host", default="127.0.0.1",
                         help="Address to listen on (default: this computer only)")
     parser.add_argument("--port", type=int, default=7860)

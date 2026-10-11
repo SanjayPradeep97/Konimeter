@@ -1,6 +1,6 @@
 # Quantification and Classification of Carbon Nanotubes in Electron Micrographs using Vision Foundation Models
 
-[![tests](https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/actions/workflows/tests.yml/badge.svg?branch=publication)](https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/actions/workflows/tests.yml?query=branch%3Apublication)
+[![tests](https://github.com/SanjayPradeep97/Konimeter/actions/workflows/tests.yml/badge.svg?branch=publication)](https://github.com/SanjayPradeep97/Konimeter/actions/workflows/tests.yml?query=branch%3Apublication)
 
 Code, results and reproduction scripts for the paper of that title (Pradeep,
 Wang, Dahm, Eldredge & Tsai; *Scientific Reports*, under review). This branch
@@ -42,12 +42,14 @@ particle, SAM masks it, the classifier labels it. `demo/run_demo.bat` (or
 ## Install
 
 ```bash
-git clone -b publication https://github.com/SanjayPradeep97/SAM-SEM-Segmentation.git
-cd SAM-SEM-Segmentation
+git clone -b publication https://github.com/SanjayPradeep97/Konimeter.git
+cd Konimeter
 ```
 
-(The repository's default branch, `main`, holds only the segmentation tool, for
-general use; everything for the paper is on this branch.)
+(The repository's default branch, `main`, holds only the segmentation tool,
+Konimeter, for general use; everything for the paper is on this branch. Until
+October 2026 the repository was called SAM-SEM-Segmentation, and links to that
+name redirect here.)
 
 Two conda environments, one per half of the project.
 
@@ -60,7 +62,7 @@ conda activate cnt-vfm
 python classification/check_env.py
 ```
 
-**Segmentation tool** (`SEM_analysis`): see the install section of
+**Segmentation tool** (`konimeter`): see the install section of
 [`docs/SEGMENTATION_TOOL.md`](docs/SEGMENTATION_TOOL.md). It needs EasyOCR and
 Gradio and is kept separate because EasyOCR pins its own PyTorch.
 

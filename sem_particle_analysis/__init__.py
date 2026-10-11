@@ -1,5 +1,5 @@
-"""Segmentation and measurement of particles in SEM/TEM micrographs,
-built on Meta's Segment Anything Model."""
+"""Konimeter's library: segmentation and measurement of particles in SEM/TEM
+micrographs, built on Meta's Segment Anything Model."""
 
 from . import modality, region
 from .model import SAMModel, discover_checkpoints, infer_model_type
@@ -13,7 +13,7 @@ from .data_manager import ResultsManager
 try:
     from importlib.metadata import PackageNotFoundError, version as _version
 
-    __version__ = _version("sem-particle-analysis")
+    __version__ = _version("konimeter")
 except (ImportError, PackageNotFoundError):  # not installed (e.g. run from source tree)
     __version__ = "unknown"
 __all__ = [

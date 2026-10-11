@@ -1,12 +1,13 @@
 @echo off
-REM Activate a conda environment: SEM_analysis, the one the README sets up for
-REM run_app.bat, unless SEM_ENV names another.
+REM Activate a conda environment: konimeter, the one the README sets up, or
+REM SEM_analysis, its name before the rename, so that existing installs keep
+REM working. Set SEM_ENV to use another.
 REM
 REM Conda is found wherever it was installed: through CONDA_EXE when started
 REM from an Anaconda Prompt, otherwise in the usual Anaconda, Miniconda and
 REM Miniforge install folders.
 
-if not defined SEM_ENV set "SEM_ENV=SEM_analysis"
+if defined SEM_ENV (set "ENV_NAMES=%SEM_ENV%") else (set "ENV_NAMES=konimeter SEM_analysis")
 
 set "CONDA_ROOT="
 if defined CONDA_EXE for %%I in ("%CONDA_EXE%\..\..") do set "CONDA_ROOT=%%~fI"
@@ -20,11 +21,13 @@ if not defined CONDA_ROOT (
 )
 
 set "ENV_DIR="
-for %%E in ("%CONDA_ROOT%\envs\%SEM_ENV%" "%USERPROFILE%\.conda\envs\%SEM_ENV%") do (
-    if not defined ENV_DIR if exist "%%~E\python.exe" set "ENV_DIR=%%~E"
+for %%N in (%ENV_NAMES%) do (
+    for %%E in ("%CONDA_ROOT%\envs\%%N" "%USERPROFILE%\.conda\envs\%%N") do (
+        if not defined ENV_DIR if exist "%%~E\python.exe" set "ENV_DIR=%%~E"
+    )
 )
 if not defined ENV_DIR (
-    echo ERROR: conda environment "%SEM_ENV%" not found under %CONDA_ROOT%\envs
+    echo ERROR: no conda environment under %CONDA_ROOT%\envs - looked for: %ENV_NAMES%
     echo Create it as the README describes, or set SEM_ENV to the one you use.
     exit /b 1
 )

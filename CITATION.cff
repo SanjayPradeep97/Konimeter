@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite the paper below."
-title: "SAM-SEM-Segmentation: quantification and classification of carbon nanotubes in electron micrographs"
+title: "Konimeter: segmentation and measurement of particles in electron micrographs"
 type: software
-repository-code: "https://github.com/SanjayPradeep97/SAM-SEM-Segmentation"
+repository-code: "https://github.com/SanjayPradeep97/Konimeter"
 license: MIT
 authors:
   - family-names: Pradeep
