@@ -83,6 +83,17 @@ def clean_path(text):
     return os.path.abspath(os.path.expanduser(text)) if text else ""
 
 
+def set_save_dataset(enabled):
+    """Turn keeping each saved frame as training data on or off."""
+    state.save_dataset = bool(enabled)
+    return state.save_dataset
+
+
+def current_save_dataset():
+    """The setting, for a browser connecting to a session already running."""
+    return state.save_dataset
+
+
 def load_images_from_folder(folder, results_file="", progress=gr.Progress()):
     """
     Open every image in one folder, and the results file that belongs to it.

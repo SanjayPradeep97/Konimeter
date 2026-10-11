@@ -56,6 +56,9 @@ class AppState:
         self.modality_choice = "auto"
         # "auto" | "bright" | "dark": likewise for particle polarity.
         self.particle_choice = "auto"
+        # Whether saving a frame also keeps its image and mask as training data
+        # (sem_particle_analysis.dataset). Session-wide, set on the Setup tab.
+        self.save_dataset = True
         # Percent of frame height to trim, overriding the measured databar. None
         # means measure it, which is right whenever the instrument recorded a
         # scan height. An escape hatch, not a routine control.

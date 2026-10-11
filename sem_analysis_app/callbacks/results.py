@@ -3,16 +3,68 @@ Results tab: saving, summarising and exporting measurements.
 """
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import gradio as gr
 import numpy as np
 
+from sem_particle_analysis import __version__ as KONIMETER_VERSION
+from sem_particle_analysis.cli import sha256_file
 from sem_particle_analysis.data_manager import parse_measurement_list
+from sem_particle_analysis.dataset import DIRNAME, TrainingSet, instance_labels
 
 from ..state import state
 from .gallery import create_image_gallery
+from .segmentation import _particle_polarity
+
+
+def save_training_frame(filename, measurements, scale_method):
+    """
+    Keep the frame and its corrected mask as training data, beside the results.
+
+    Every saved frame has been checked by the analyst, so its mask is a label;
+    see sem_particle_analysis.dataset for the layout. A failure here is
+    reported but does not undo the results row, which is what the analyst
+    asked for.
+
+    Returns:
+        str: A note for the status line; empty when saving training data is off.
+    """
+    if not getattr(state, "save_dataset", True):
+        return ""
+    image = state.cropped_image
+    if image is None or state.analyzer is None:
+        return " · ⚠️ training data not saved: no segmented frame"
+    try:
+        source = Path(state.image_paths[state.current_index])
+        valid = getattr(state, "analysable_region", None)
+        if valid is not None and valid.shape != image.shape[:2]:
+            valid = None
+        model = getattr(state, "sam_model", None)
+        full = getattr(state, "current_image", None)
+        TrainingSet.beside(state.results_manager.csv_file).save(
+            os.path.splitext(filename)[0],
+            image,
+            instance_labels(state.analyzer.regions, image.shape),
+            valid,
+            # Names, not paths: a dataset may be shared, and a path names the
+            # analyst's machine. The hash identifies the original.
+            source_file=source.name,
+            source_sha256=sha256_file(source) if source.is_file() else "",
+            rows_trimmed=full.shape[0] - image.shape[0] if full is not None else 0,
+            nm_per_px=measurements.get("nm_per_px"),
+            scale_method=scale_method,
+            modality=state.modality.kind if state.modality is not None else "",
+            particles={True: "dark", False: "bright"}.get(_particle_polarity(), "contrast"),
+            model=getattr(model, "model_type", ""),
+            checkpoint=Path(model.checkpoint).name if model is not None else "",
+            saved_utc=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            konimeter_version=KONIMETER_VERSION,
+        )
+        return f" · image and mask added to {DIRNAME}/"
+    except Exception as problem:
+        return f" · ⚠️ training data not saved: {problem}"
 
 def save_current_results(file_name=None):
     """
@@ -58,11 +110,13 @@ def save_current_results(file_name=None):
         state.mark_processed(state.current_index, measurements['num_particles'])
         state.save_state()
 
+        note = save_training_frame(filename, measurements, scale_method)
+
         # Update gallery
         gallery_data = create_image_gallery()
 
         return (
-            f"✅ Saved results for {filename}",
+            f"✅ Saved results for {filename}{note}",
             gallery_data
         )
 
@@ -153,8 +207,11 @@ def delete_result_row(selected_item):
         # Get filename for confirmation message
         filename = results_df.loc[idx, 'file_name']
 
-        # Delete the row
+        # Delete the row, and the frame's training data with it, so the dataset
+        # holds the frames the results file does.
         state.results_manager.delete_result(idx)
+        TrainingSet.beside(state.results_manager.csv_file).remove(
+            os.path.splitext(str(filename))[0])
 
         # Get updated summary (includes new dropdown choices)
         display_df, progress_text, particle_stats_text, dropdown_update = get_session_summary()

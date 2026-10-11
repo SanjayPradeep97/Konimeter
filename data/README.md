@@ -16,6 +16,8 @@ data/
 
 Keeping one folder per sample matters because the app opens every image in the
 folder you give it, and keeps one `analysis_results.csv` per folder.
+Saved frames are also kept, with their masks, in that folder's
+`konimeter_dataset/` (see the README, "Training data").
 
 ## Formats
 

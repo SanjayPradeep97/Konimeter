@@ -213,6 +213,28 @@ are recorded in `run.json`. Check its output before relying on the counts.
 Supported images: `.tif`, `.tiff`, `.png`, `.jpg`, `.jpeg`, in any letter case,
 directly inside the folder (subfolders are not searched).
 
+### Training data
+
+Every frame you save has been segmented by SAM and then checked, and corrected
+where needed, by you, so its mask is a label. The app keeps each one in
+`konimeter_dataset/`, beside the results file, so analysing a folder also builds
+a labelled dataset for training a classifier or fine-tuning the segmentation
+model:
+
+| Path | Contents |
+| --- | --- |
+| `images/<name>.png` | the frame exactly as segmented, with any databar trimmed off |
+| `masks/<name>_mask.png` | 8-bit, 255 = particle: the format the paper's classification pipeline reads |
+| `labels/<name>_labels.png` | 16-bit, one value per particle; value *i* is the *i*-th particle in the frame's row of `analysis_results.csv` |
+| `valid/<name>_valid.png` | 255 where the frame is specimen; 0 where it was left out of analysis (aperture vignette, grid bar, burned-in scale bar), so those pixels count as neither particle nor background |
+| `index.csv` | one row per frame: the source file's name and SHA-256, size, scale and how it was set, instrument kind, particle polarity, SAM model, and when it was saved |
+
+Saving a frame again replaces its entry; deleting its row on the Results tab
+deletes it. The index records file names, never paths, so the folder can be
+shared without revealing where it lived. Nothing leaves your computer; to turn
+it off, untick **Also keep each saved image and its mask as training data** on
+the Setup tab.
+
 ---
 
 ## Troubleshooting

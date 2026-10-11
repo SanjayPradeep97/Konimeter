@@ -38,6 +38,7 @@ sam_weights/*.pth
 analysis_results*.csv
 .app_state.json
 .analysis_state.json
+konimeter_dataset/
 
 # Scratch scripts and notes dropped at the repo root. Scoped to the root with
 # a leading slash: an unanchored "test_*.py" also matches tests/test_*.py, which
