@@ -8,6 +8,8 @@ set CNT_BASE=<directory containing "NIOSH Dataset">
 reproduce.bat                       :: at the repository root
 ```
 
+On Linux or macOS, `export CNT_BASE=...` and `./reproduce.sh` do the same.
+
 It refuses to continue past any failing step, and the last step fails loudly
 if the results files disagree with the manuscript's numbers.
 
@@ -15,8 +17,8 @@ if the results files disagree with the manuscript's numbers.
 
 | step | script | cost (RTX 5080) | output |
 |------|--------|------|--------|
-| 0 | `check_env.py`, `encoder_bench.py --dry-run`, `check_cache_agreement.py` | 20 s | environment usable; both scripts agree, byte for byte, on all 40 feature-cache filenames (default and every variant) |
-| 1 | `encoder_bench.py --group reviewers` | ~9 min, or seconds if cached | 8 encoders at the matched 32x32 benchmark geometry, `<CNT_BASE>/Encoder Benchmark/feats_*_dataset_splits.npz` |
+| 0 | `check_env.py`, `download_sam_weights.py --model vit_b`, `encoder_bench.py --dry-run`, `check_cache_agreement.py` | 20 s, plus the 358 MB checkpoint once | environment usable; the SAM ViT-B checkpoint step 5 needs is in `sam_weights/`; both scripts agree, byte for byte, on all 40 feature-cache filenames (default and every variant) |
+| 1 | `encoder_bench.py --group benchmark` | ~9 min, or seconds if cached | 8 encoders at the matched 32x32 benchmark geometry, `<CNT_BASE>/Encoder Benchmark/feats_*_dataset_splits.npz` |
 | 2 | `encoder_bench.py --encoders dinov2_b14 --target-grid 37 --taps 1,3,6,9,11` | 30 s, or seconds if cached | DINOv2 at the manuscript geometry |
 | 3 | `paper_results.py --stages probes finetune analyse` | ~3 h; **skipped while `results/analysis.json` exists** | 108 probes, 10 fine-tuned baselines, `analysis.json`, per-image predictions |
 | 4 | `epoch_sweep.py` | 3 min | epoch-budget ablation, decided on CV (`results/epoch_sweep.json`) |
@@ -34,10 +36,12 @@ Stage 3 alone can also be run in pieces:
 ```bat
 cd classification
 python paper_results.py --smoke --stages probes finetune analyse     :: ~10 min end-to-end check
-python paper_results.py --stages finetune                            :: overnight
+python paper_results.py --stages finetune                            :: most of the ~3 h
 python paper_results.py --stages probes
 python paper_results.py --stages analyse                             :: no GPU, no data root needed
 ```
+
+A `--smoke` run writes to `results/smoke/`, never over the shipped results.
 
 The Luo et al. baseline is run separately (`baseline/run_all.py`, ~2 h) and
 its results are read from `baseline/results/`; stage 6 and 7 use them.

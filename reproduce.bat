@@ -4,7 +4,7 @@ REM  reproduce.bat -- rebuild every number, table and figure in the manuscript
 REM  from the raw dataset and the split file, then verify that the results
 REM  files still say what the manuscript says.
 REM
-REM  Needs:   conda env  cnt-vfm   (environment.yml)
+REM  Needs:   conda env  cnt-vfm   (environment.yml or environment-cpu.yml)
 REM           CNT_BASE   the data root: <CNT_BASE>\NIOSH Dataset\CNT-*\*.tif and
 REM                      <CNT_BASE>\NIOSH Dataset\Masks\masks\*_mask.png
 REM                      (see README.md, "Data")
@@ -38,20 +38,23 @@ if not exist "%CNT_BASE%\NIOSH Dataset" (
 )
 set "BENCHD=%CNT_BASE%\Encoder Benchmark"
 
+REM Found and activated the way run_app.bat does it, wherever conda is installed.
 if not "%CONDA_DEFAULT_ENV%"=="cnt-vfm" (
-  call "%USERPROFILE%\anaconda3\Scripts\activate.bat" "%USERPROFILE%\anaconda3" 2>nul
-  call conda activate cnt-vfm || (echo could not activate conda env cnt-vfm ^(environment.yml^) & exit /b 1)
+  set "SEM_ENV=cnt-vfm"
+  call "%REPO%\scripts\activate_env.bat" || exit /b 1
 )
 
 cd /d "%CLS%"
 
 echo ==== 0. preflight =========================================================
 python -u check_env.py || goto :fail
-python -u encoder_bench.py --stage features --group reviewers --splits "%SPLITS%" --out-dir "%BENCHD%" --dry-run || goto :fail
+REM Figure 7 runs SAM ViT-B; fetched once (358 MB), skipped when present.
+python -u "%REPO%\download_sam_weights.py" --model vit_b || goto :fail
+python -u encoder_bench.py --stage features --group benchmark --splits "%SPLITS%" --out-dir "%BENCHD%" --dry-run || goto :fail
 python -u check_cache_agreement.py --splits "%SPLITS%" || goto :fail
 
 echo ==== 1-2. features (skipped per encoder when the cache exists) =============
-python -u encoder_bench.py --stage features --group reviewers --splits "%SPLITS%" --out-dir "%BENCHD%" || goto :fail
+python -u encoder_bench.py --stage features --group benchmark --splits "%SPLITS%" --out-dir "%BENCHD%" || goto :fail
 python -u encoder_bench.py --stage features --encoders dinov2_b14 --target-grid 37 --taps 1,3,6,9,11 --splits "%SPLITS%" --out-dir "%BENCHD%" || goto :fail
 
 echo ==== 3. probes + fine-tuned baselines + analysis ===========================
