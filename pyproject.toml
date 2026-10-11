@@ -35,7 +35,8 @@ dependencies = [
     "easyocr>=1.7.0",
     "tifffile>=2023.1.0",
     "tqdm>=4.65.0",
-    "gradio>=4.0.0",
+    # 6.0 moved css, theme and head from Blocks() to launch(), which both apps use.
+    "gradio>=6.0",
     "segment-anything @ git+https://github.com/facebookresearch/segment-anything.git",
 ]
 

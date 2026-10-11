@@ -43,7 +43,7 @@ dependencies:
       - scikit-image
       - tqdm
       - ultralytics>=8.3
-      - gradio>=5
+      - gradio>=6   # css, theme and head are launch() arguments from 6.0
       - pytest>=7
       - tifffile
       - git+https://github.com/facebookresearch/segment-anything.git
