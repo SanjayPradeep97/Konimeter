@@ -55,6 +55,7 @@ runs/
 *.npz
 *.npy
 results/figures/*.pdf
+results/smoke/
 yolo*.pt
 *.part
 demo/images/**/*.tif

@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """
-paper_results.py -- regenerate EVERY quantitative result in the revised
-manuscript under one protocol.
+paper_results.py -- regenerate EVERY quantitative result in the manuscript
+under one protocol.
 
-    python paper_results.py --smoke      # ~6 min, proves the pipeline runs
+    python paper_results.py --smoke      # ~10 min on a GPU, proves the pipeline runs
     python paper_results.py --plan       # print the work list and exit
-    python paper_results.py --full       # the real run
+    python paper_results.py              # the real run (~3 h on a GPU)
 
 Every method -- frozen probes, fine-tuned CNNs, and the Luo et al.
 re-implementation -- is evaluated by paper_protocol.run(), on the same
@@ -15,15 +15,21 @@ The test set is scored once per reported variant and never influences training,
 early stopping, or model selection.
 
 STAGES
-  probes     9 frozen encoders x {masked, uniform} x {avg, max, avg+max}
-             x {linear, mlp}  = 108 configurations.  Features are cached, so
-             this stage trains probe heads only.
+  probes     8 frozen encoders (DINOv2 at two geometries, so 9 encoder-geometry
+             pairs) x {masked, uniform} x {avg, max, avg+max} x {linear, mlp}
+             = 108 configurations.  Features are cached, so this stage trains
+             probe heads only.
   finetune   5 architectures x {masked, raw} end-to-end fine-tuned.
-  luo        VGG-16 hypercolumns + VLAD + XGBoost (published baseline).
   analyse    aggregate, run the statistical tests, emit the manuscript tables.
 
-Results land in <out>/results_<stage>.csv plus a machine-readable
-all_results.json.  Re-running skips completed work unless --force.
+The Luo et al. baseline is not a stage here: it is run by baseline/run_all.py,
+and its results are read from baseline/results/.
+
+Results land in <out>/results_<stage>.csv, per-image predictions in
+<out>/per_image_<stage>.json, and the statistics in <out>/analysis.json.  <out>
+is results/, except that a --smoke run writes to results/smoke/, so it never
+replaces the results the paper reports.  Every run recomputes what it is asked
+for; reproduce.sh / reproduce.bat are what skip stage 3 when results exist.
 """
 from __future__ import annotations
 
@@ -54,10 +60,9 @@ ENCODERS = ["dinov2_b14", "sam_b16", "dinov3_b16", "dinov2_reg",
 # USAM_CHECKPOINT it loads samvit_base_patch16.sa1b -- byte-identical to
 # sam_b16 -- so a default run would extract features for every image and
 # report a duplicate of SAM under a "micro-SAM" label.  It stays available
-# via `--encoders ... usam_b` once the checkpoint is set; the reviewer point
-# it answers (R1-L1) is better handled in the response letter, since micro-SAM
-# is trained for biological microscopy and its own documentation directs
-# non-bio users to SAM.
+# via `--encoders ... usam_b` once the checkpoint is set.  It is not reported:
+# micro-SAM is trained for biological microscopy, and its own documentation
+# directs other users to SAM, which is in the roster.
 OPTIONAL_ENCODERS = ["usam_b"]
 MASKS = ["masked", "nomask"]
 POOLS = ["avg", "max", "avg+max"]
@@ -407,19 +412,25 @@ def stage_analyse(args, out_dir):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--smoke", action="store_true")
-    ap.add_argument("--full", action="store_true")
+    ap.add_argument("--smoke", action="store_true",
+                    help="a short end-to-end check on one configuration; writes "
+                         "to results/smoke/ unless --out is given")
+    # The full run is the default; --full is accepted so older commands work.
+    ap.add_argument("--full", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--plan", action="store_true")
-    ap.add_argument("--stages", nargs="+",
-                    default=["probes", "finetune", "luo", "analyse"])
-    ap.add_argument("--out", type=Path, default=cnt_paths.results_dir(),
-                    help="results directory (default <repo>/results)")
+    ap.add_argument("--stages", nargs="+", choices=["probes", "finetune", "luo", "analyse"],
+                    default=["probes", "finetune", "analyse"])
+    ap.add_argument("--out", type=Path, default=None,
+                    help="results directory (default <repo>/results, or "
+                         "<repo>/results/smoke with --smoke)")
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--patience", type=int, default=10)
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--device", default="auto")
-    ap.add_argument("--force", action="store_true")
+    # Nothing here skips completed work, so there is nothing to force;
+    # reproduce.sh / reproduce.bat take --force.  Accepted so older commands work.
+    ap.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--prep-max-side", type=int, default=384,
                     help="cache decoded images downscaled to this long side "
                          "(never upscaled). 0 keeps full 1350x1040 resolution.")
@@ -440,6 +451,17 @@ def main(argv=None):
     ap.add_argument("--ft-patience", type=int, default=8)
     ap.add_argument("--ft-batch", type=int, default=32)
     a = ap.parse_args(argv)
+
+    if "luo" in a.stages:
+        # Refused before anything runs, not after hours of probes.
+        raise SystemExit(
+            "The Luo stage is not run from here: baseline/run_all.py runs it, and\n"
+            "  baseline/results/luo_baseline_summary.csv already holds both split "
+            "files x clean/leaky.\n  Drop 'luo' from --stages.")
+    if a.out is None:
+        # A smoke run's per-image predictions and analysis.json have the same
+        # names as the shipped ones, so it gets a directory of its own.
+        a.out = cnt_paths.results_dir() / "smoke" if a.smoke else cnt_paths.results_dir()
 
     import torch
     dev = torch.device("cuda" if (a.device in ("auto", "cuda")
@@ -503,12 +525,6 @@ def main(argv=None):
         stage_finetune(a, dev, ft_models, ft_inputs,
                        a.out / ("results_finetune_smoke.csv" if a.smoke
                                 else "results_finetune.csv"))
-    if "luo" in a.stages:
-        raise SystemExit(
-            "ABORT: the Luo stage is deliberately not wired.\n"
-            "  luo_baseline_summary.csv already holds both split files x "
-            "clean/leaky.\n  Re-running it produces no new information; drop "
-            "'luo' from --stages.")
     if "analyse" in a.stages:
         stage_analyse(a, a.out)
     log(f"\n  total {(time.time()-t0)/60:.1f} min")

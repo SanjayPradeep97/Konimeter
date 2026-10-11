@@ -33,11 +33,13 @@ cd "$CLS"
 
 echo "==== 0. preflight ========================================================="
 python -u check_env.py || fail
-python -u encoder_bench.py --stage features --group reviewers --splits "$SPLITS" --out-dir "$BENCHD" --dry-run || fail
+# Figure 7 runs SAM ViT-B; fetched once (358 MB), skipped when present.
+python -u "$REPO/download_sam_weights.py" --model vit_b || fail
+python -u encoder_bench.py --stage features --group benchmark --splits "$SPLITS" --out-dir "$BENCHD" --dry-run || fail
 python -u check_cache_agreement.py --splits "$SPLITS" || fail
 
 echo "==== 1-2. features (skipped per encoder when the cache exists) ============="
-python -u encoder_bench.py --stage features --group reviewers --splits "$SPLITS" --out-dir "$BENCHD" || fail
+python -u encoder_bench.py --stage features --group benchmark --splits "$SPLITS" --out-dir "$BENCHD" || fail
 python -u encoder_bench.py --stage features --encoders dinov2_b14 --target-grid 37 --taps 1,3,6,9,11 --splits "$SPLITS" --out-dir "$BENCHD" || fail
 
 echo "==== 3. probes + fine-tuned baselines + analysis ==========================="
