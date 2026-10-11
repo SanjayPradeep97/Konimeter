@@ -57,9 +57,6 @@ sem_analysis_app/
     visualization.py  overlays and figures
 ```
 
-`sem_review_app/` is a second, smaller page for correcting the output of a batch
-run; it reuses the same callbacks.
-
 ## Establishing scale
 
 Scale gets its own tab, because every measurement is a pixel count multiplied by
@@ -78,7 +75,7 @@ crosshair marking precisely which pixel a click will land on.
 A tier-2 reading is marked unconfirmed until you press **Confirm scale**; tier 1
 and tier 3 are trusted outright, since neither involves a machine reading a
 glyph. The result is shown as "X nm/px · how it was obtained", and it is what the
-Processing tab and the results CSV use. Nothing downstream re-detects scale or
+Segment & Refine tab and the results CSV use. Nothing downstream re-detects scale or
 overrides what you set here.
 
 Calibration needs only OCR, so you can sort out scale before loading a SAM
@@ -96,7 +93,7 @@ the file rather than asking you to remember:
 | Scale bar | in the databar, which gets cropped | burned into the frame, so its patch is excluded from measurement |
 | Particles are | **brighter** than the substrate | **darker** than the support film |
 
-Both decisions are shown on the Scale tab and can be overridden there, or with
+Both decisions are shown on the Scale & Frame tab and can be overridden there, or with
 `--modality` and `--particles` in batch mode.
 
 **Analysable region.** Micrographs routinely contain large areas that are not
@@ -105,7 +102,7 @@ blocking the beam, a burned-in scale bar. Every one of them out-contrasts the
 particles, so they are excluded before anything is measured. Left in, they are
 what gets measured. On real frames these produced five "particles" of 119 µm
 that were the corner wedges, and 221 spurious particles that were a grid bar.
-The share excluded is shown on the Scale tab and recorded per image in
+The share excluded is shown on the Scale & Frame tab and recorded per image in
 `run.json`.
 
 **Magnification.** Low-magnification overviews are navigation frames; their

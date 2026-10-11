@@ -29,7 +29,7 @@ particle, SAM masks it, the classifier labels it. `demo/run_demo.bat` (or
 
 | directory | what it holds |
 |---|---|
-| `sem_particle_analysis/`, `sem_analysis_app/`, `sem_review_app/`, `tests/` | the segmentation library, its Gradio app, the review app for correcting a batch analysis, and their test suite |
+| `sem_particle_analysis/`, `sem_analysis_app/`, `tests/` | the segmentation library, its Gradio app, and their test suite |
 | `classification/` | protocol, feature extraction, probes, fine-tuned baselines, statistics, figure and table scripts, tests |
 | `baseline/` | the Luo et al. (2021) VGG-16 + VLAD re-implementation and its results |
 | `results/` | the run the paper reports: every configuration's metrics and **per-image predictions**, `analysis.json`, the epoch sweep, regenerated figures |

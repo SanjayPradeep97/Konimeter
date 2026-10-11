@@ -20,10 +20,9 @@ def save_current_results(file_name=None):
 
     Args:
         file_name (str, optional): What to record the frame as. Defaults to the
-            basename of the open file. The review app passes the name the
-            analysis used, so a reviewed row and an automatic one refer to the
-            same frame by the same name — it works from PNG copies of TIFFs, and
-            without this the two files could not be lined up at all.
+            basename of the open file. A caller working from converted
+            copies passes the original's name, so its rows line up with
+            results recorded from the originals.
 
     Saving a frame that has already been saved replaces its row. Going back to
     a frame to correct it is normal work, and it used to leave two rows behind:
