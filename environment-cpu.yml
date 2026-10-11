@@ -2,8 +2,11 @@
 #
 # Use this on macOS, on Linux/Windows machines without an NVIDIA GPU, or
 # whenever environment.yml fails to resolve the CUDA 12.8 torch build.  Same
-# package set as environment.yml; torch comes from PyPI (CPU on Windows/Linux,
-# CPU + MPS on Apple silicon).
+# package set as environment.yml.  PyTorch, torchvision and XGBoost come from
+# conda-forge rather than PyPI (CPU on Windows/Linux, CPU + MPS on Apple
+# silicon), so that they share conda's single OpenMP runtime.  From PyPI on
+# macOS, XGBoost cannot load at all without Homebrew's libomp, and with it the
+# two OpenMP runtimes crash the Luo baseline as soon as both are in use.
 #
 #     conda env create -f environment-cpu.yml
 #     conda activate cnt-vfm
@@ -19,12 +22,12 @@ channels:
 dependencies:
   - python=3.11
   - pip
+  - pytorch>=2.6
+  - torchvision
+  - xgboost>=2.1
   - pip:
-      - torch>=2.6
-      - torchvision
       - timm>=1.0.15
       - huggingface_hub
-      - xgboost>=2.1
       - scikit-learn>=1.4
       - scipy
       - numpy
