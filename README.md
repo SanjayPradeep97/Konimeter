@@ -1,20 +1,27 @@
-# SAM-SEM Segmentation
+# Konimeter
 
-[![tests](https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/actions/workflows/tests.yml)
+[![tests](https://github.com/SanjayPradeep97/Konimeter/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/SanjayPradeep97/Konimeter/actions/workflows/tests.yml)
 
-Segment and measure particles in SEM and TEM micrographs with Meta's
+Segment, count and measure particles in SEM and TEM micrographs with Meta's
 [Segment Anything Model](https://segment-anything.com/) (SAM): a web app for
 interactive analysis, and a command-line tool for running the same pipeline over
-a folder.
+a folder. It has been used for carbon nanotubes, microplastics and wildfire
+particulate matter, and works for anything else that can be imaged as particles.
 
 For every image you get a particle count and, per particle, the area and the
 equivalent circular diameter, in pixels and in nanometres.
 
+*The name:* a konimeter (Greek *konis*, dust) was the instrument that measured
+dust exposure in mines by catching particles on a glass slide, to be counted
+under a microscope. This is the same job, done by a model instead of an eye.
+The project was called SAM-SEM-Segmentation until October 2026; old links
+redirect here.
+
 > **Reviewing the paper?** The code, results and reproduction scripts for
 > *Quantification and Classification of Carbon Nanotubes in Electron Micrographs
 > using Vision Foundation Models* are on the
-> [`publication`](https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/tree/publication)
-> branch: `git clone -b publication https://github.com/SanjayPradeep97/SAM-SEM-Segmentation.git`
+> [`publication`](https://github.com/SanjayPradeep97/Konimeter/tree/publication)
+> branch: `git clone -b publication https://github.com/SanjayPradeep97/Konimeter.git`
 
 ---
 
@@ -26,11 +33,11 @@ its GitHub repository. Python 3.10 to 3.12 work; the commands below use 3.11.
 Run them in a terminal (on Windows, the Anaconda Prompt).
 
 ```bash
-git clone https://github.com/SanjayPradeep97/SAM-SEM-Segmentation.git
-cd SAM-SEM-Segmentation
+git clone https://github.com/SanjayPradeep97/Konimeter.git
+cd Konimeter
 
-conda create -n SEM_analysis python=3.11
-conda activate SEM_analysis
+conda create -n konimeter python=3.11
+conda activate konimeter
 ```
 
 Install PyTorch **before** the package. EasyOCR depends on it, and if it is not
@@ -76,7 +83,7 @@ The first time a scale bar is read, EasyOCR downloads its text models (about
 | | |
 | --- | --- |
 | Windows | double-click `run_app.bat` |
-| Any platform | `python -m sem_analysis_app` |
+| Any platform | `konimeter`, in the activated environment |
 
 Then open http://127.0.0.1:7860. `--port` and `--host` change where it listens.
 `--share` also serves the app through a public Gradio link; since the app opens
@@ -85,7 +92,8 @@ share it only with people you trust.
 
 `run_app.bat` finds conda in the usual Anaconda, Miniconda and Miniforge install
 folders, or the one an Anaconda Prompt was started from, and activates
-`SEM_analysis`; set `SEM_ENV` first to use another environment. On Windows outside the launcher,
+the `konimeter` environment (or `SEM_analysis`, its name before the rename); set
+`SEM_ENV` first to use another environment. On Windows outside the launcher,
 set `KMP_DUPLICATE_LIB_OK=TRUE` before starting — PyTorch and NumPy each ship an
 OpenMP runtime and otherwise refuse to share a process.
 
@@ -155,7 +163,7 @@ how it was obtained, all parameters, library versions and the git revision, so a
 result can be traced back to exactly what produced it.
 
 ```bash
-sem-analyze path/to/images -o path/to/output --clear-edges
+konimeter-batch path/to/images -o path/to/output --clear-edges
 ```
 
 Outputs: `particles.csv` (one row per particle), `per_image_summary.csv`,
@@ -216,9 +224,9 @@ directly inside the folder (subfolders are not searched).
 | The app will not start because the port is in use | Another copy is running; close it, or start with `--port 7861` |
 | "No images in …" | The images must be directly inside the folder, with one of the extensions above |
 | "Cannot write results to …" | The folder is read-only (a network share, say). Open **Save results somewhere else** on the Setup tab and give a writable folder |
-| `ModuleNotFoundError` for `sem_particle_analysis` or `sem_analysis_app` | The environment is not active, or `pip install -e .` was not run in it |
+| `konimeter: command not found`, or `ModuleNotFoundError` for `sem_particle_analysis` or `sem_analysis_app` | The environment is not active, or `pip install -e .` was not run in it |
 
-Anything else: please [open an issue](https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/issues)
+Anything else: please [open an issue](https://github.com/SanjayPradeep97/Konimeter/issues)
 with the message and what you were doing.
 
 ---
@@ -238,15 +246,16 @@ rather than merely a changed one.
 
 Importing `sem_particle_analysis` pulls in neither EasyOCR nor Gradio: without
 EasyOCR, scale from metadata or by hand still works, and the library and
-`sem-analyze` do not need Gradio.
+`konimeter-batch` do not need Gradio. (`sem-analyze`, the batch command's
+earlier name, still works.)
 
 ---
 
 ## Layout
 
 ```
-sem_analysis_app/        the web app (python -m sem_analysis_app)
-sem_particle_analysis/   the library and the sem-analyze command
+sem_analysis_app/        the web app (konimeter, or python -m sem_analysis_app)
+sem_particle_analysis/   the library and the konimeter-batch command
 tests/                   the test suite
 download_sam_weights.py  fetches SAM checkpoints into sam_weights/
 run_app.bat              Windows launcher (scripts/activate_env.bat finds conda)

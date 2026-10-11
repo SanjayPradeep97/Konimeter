@@ -50,5 +50,5 @@ analysis_results*.csv
 gradio_cached_examples/
 flagged/
 
-# Default output folder of sem-analyze, when run from the repository root.
+# Default output folder of konimeter-batch, when run from the repository root.
 /analysis_output/

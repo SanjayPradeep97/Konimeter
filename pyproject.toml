@@ -3,9 +3,9 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sem-particle-analysis"
-version = "0.2.0"
-description = "Particle segmentation and measurement in SEM/TEM micrographs, built on Segment Anything"
+name = "konimeter"
+version = "0.3.0"
+description = "Segment, count and measure particles in SEM and TEM micrographs, built on Segment Anything"
 readme = "README.md"
 # Gradio 6 needs 3.10.
 requires-python = ">=3.10"
@@ -14,7 +14,8 @@ license-files = ["LICENSE"]
 authors = [
     {name = "Sanjay Pradeep"}
 ]
-keywords = ["image-processing", "segmentation", "microscopy", "SEM", "TEM", "SAM", "particle-analysis"]
+keywords = ["image-processing", "segmentation", "microscopy", "SEM", "TEM", "SAM", "particle-analysis",
+            "exposure-science", "nanomaterials", "microplastics", "particulate-matter"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -45,6 +46,9 @@ dependencies = [
 ]
 
 [project.scripts]
+konimeter = "sem_analysis_app.__main__:main"
+konimeter-batch = "sem_particle_analysis.cli:main"
+# The batch command's name before the rename, kept so existing scripts still run.
 sem-analyze = "sem_particle_analysis.cli:main"
 
 [project.optional-dependencies]
@@ -53,9 +57,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/SanjayPradeep97/SAM-SEM-Segmentation"
-Repository = "https://github.com/SanjayPradeep97/SAM-SEM-Segmentation"
-Issues = "https://github.com/SanjayPradeep97/SAM-SEM-Segmentation/issues"
+Homepage = "https://github.com/SanjayPradeep97/Konimeter"
+Repository = "https://github.com/SanjayPradeep97/Konimeter"
+Issues = "https://github.com/SanjayPradeep97/Konimeter/issues"
 
 [tool.setuptools.packages.find]
 include = ["sem_particle_analysis*", "sem_analysis_app*"]

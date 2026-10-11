@@ -3,7 +3,7 @@ The batch pipeline end to end, with real SAM weights.
 
 Everything else in the suite stops short of the model, so this is the one test
 that a checkout can actually segment: a synthetic frame of dark disks of known
-size goes through sem-analyze, and the particles, the measurements and the
+size goes through konimeter-batch, and the particles, the measurements and the
 provenance record that come out are checked.
 """
 

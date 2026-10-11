@@ -7,7 +7,7 @@ Layout:
     ui.py          interface definition and event wiring
     visualization.py  overlay and figure rendering
 
-Run it with ``python -m sem_analysis_app`` from the repository root.
+Run it with ``konimeter``, or ``python -m sem_analysis_app``.
 """
 
 __all__ = ["create_interface"]

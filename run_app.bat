@@ -1,5 +1,5 @@
 @echo off
-REM Launch the analysis app. Double-click it, or run it from a terminal; any
+REM Launch Konimeter. Double-click it, or run it from a terminal; any
 REM arguments are passed on (for example --port 7861).
 
 chcp 65001 > nul 2>&1
@@ -14,7 +14,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo Starting the analysis app. Open the address it prints below
+echo Starting Konimeter. Open the address it prints below
 echo ^(http://127.0.0.1:7860 unless you passed --port^). Press Ctrl+C to stop it.
 echo.
 python -m sem_analysis_app %*

@@ -42,3 +42,28 @@ jobs:
         run: pip install -e . pytest
       - name: Run the tests
         run: pytest -m "not slow"
+
+  launcher:
+    # run_app.bat and reproduce.bat find conda and the environment through
+    # scripts/activate_env.bat; this runs it as a double-click would, with an
+    # environment under the current name and under the name before the rename.
+    name: windows launcher / ${{ matrix.env }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [konimeter, SEM_analysis]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: ${{ matrix.env }}
+          python-version: "3.11"
+          auto-activate-base: false
+      - name: activate_env.bat activates the environment
+        shell: cmd
+        run: |
+          set "SEM_ENV="
+          call scripts\activate_env.bat || exit /b 1
+          python -c "import os, sys; p = os.environ.get('CONDA_PREFIX', ''); print(p); sys.exit(not p.lower().endswith('${{ matrix.env }}'.lower()))"

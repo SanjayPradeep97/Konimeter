@@ -42,7 +42,7 @@ def remove_objects_smaller_than(mask, min_size):
 
     A component of area exactly ``min_size`` is **kept**. That is what the rest
     of the pipeline promises — ``analyze_mask`` filters with ``area >= min_size``
-    and ``sem-analyze --min-size N`` is documented as ignoring particles *below*
+    and ``konimeter-batch --min-size N`` is documented as ignoring particles *below*
     N — but it is not what the library does any more.
 
     ``remove_small_objects(min_size=N)`` was documented as removing components

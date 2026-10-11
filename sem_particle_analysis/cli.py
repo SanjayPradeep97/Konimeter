@@ -7,7 +7,7 @@ inputs, the model, the scale and where it came from, every parameter, and the
 library versions. Interactive refinement is deliberately not available here —
 anything this tool reports came out of the automatic pipeline alone.
 
-    sem-analyze path/to/images -o path/to/output
+    konimeter-batch path/to/images -o path/to/output
 """
 
 import argparse
@@ -399,7 +399,7 @@ def write_distributions(per_particle, out_dir):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        prog="sem-analyze",
+        prog="konimeter-batch",
         description="Batch particle analysis for SEM/TEM micrographs (no GUI).",
     )
     parser.add_argument("input", type=Path,
