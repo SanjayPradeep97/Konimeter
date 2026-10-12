@@ -92,10 +92,73 @@ class TestMaskSnapshots:
         state = state_with_particles
         state.snapshot_mask()
         state.analyzer.mask[:] = False
-        state.analyzer._relabel_and_filter()
+        state.analyzer._relabel()
         assert len(state.analyzer.regions) == 0
         assert state.restore_mask() is True
         assert len(state.analyzer.regions) > 0
+
+
+    def test_undo_brings_back_exactly_what_was_there(self, state_with_particles):
+        # Restoring used to clean the snapshot again, so Undo could come back
+        # with areas a little different from the ones it was undoing to.
+        state = state_with_particles
+        labels = state.analyzer.labeled_mask.copy()
+        areas = [r.area for r in state.analyzer.regions]
+
+        state.snapshot_mask()
+        state.analyzer.delete_particles([state.analyzer.regions[1].label])
+        state.restore_mask()
+
+        assert np.array_equal(state.analyzer.labeled_mask, labels)
+        assert [r.area for r in state.analyzer.regions] == areas
+
+
+class TestSelections:
+    def test_a_near_miss_is_anchored_inside_the_particle(self, state_with_particles):
+        # A click may land a few pixels off the particle it selects. Anchored to
+        # the background pixel clicked, the selection resolved to nothing at
+        # Apply and silently vanished.
+        state = state_with_particles
+        labels = state.analyzer.labeled_mask
+        label = int(labels[70, 70])
+        cols = np.where(labels[70] == label)[0]
+        click = (int(cols.max()) + 5, 70)
+        assert labels[click[1], click[0]] == 0
+
+        state.anchor_selection(label, click, labels)
+
+        x, y = state.pending_anchors[label]
+        assert labels[y, x] == label
+        assert (x, y) == (int(cols.max()), 70)
+        assert state.resolve_label(label, labels) == label
+
+    def test_a_direct_hit_is_anchored_where_it_was_clicked(self, state_with_particles):
+        state = state_with_particles
+        labels = state.analyzer.labeled_mask
+        state.anchor_selection(int(labels[70, 70]), (70, 70), labels)
+        assert state.pending_anchors[int(labels[70, 70])] == (70, 70)
+
+    def test_a_relabel_drops_the_click_history(self, state_with_particles):
+        # Undo into a history that still names the old labels outlined and
+        # edited whichever particles had inherited them.
+        state = state_with_particles
+        state.save_pending_state()
+        state.reindex_pending(state.analyzer.labeled_mask)
+        assert state.undo_history == []
+
+    def test_clearing_pending_edits_keeps_applied_ones(self, state_with_particles):
+        state = state_with_particles
+        state.snapshot_mask()
+        state.pending_deletes = [1]
+        state.pending_anchors = {1: (70, 70)}
+        state.point_refine_points = [(1, 1)]
+        state.save_pending_state()
+
+        state.clear_pending_edits()
+
+        assert (state.pending_deletes, state.pending_anchors,
+                state.point_refine_points, state.undo_history) == ([], {}, [], [])
+        assert len(state.mask_history) == 1
 
 
 class TestResetClearsHistory:

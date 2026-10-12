@@ -27,7 +27,7 @@ for %%N in (%ENV_NAMES%) do (
     )
 )
 if not defined ENV_DIR (
-    echo ERROR: no conda environment under %CONDA_ROOT%\envs - looked for: %ENV_NAMES%
+    echo ERROR: no conda environment under "%CONDA_ROOT%\envs" - looked for: %ENV_NAMES%
     echo Create it as the README describes, or set SEM_ENV to the one you use.
     exit /b 1
 )
@@ -42,7 +42,7 @@ if /i not "%CONDA_PREFIX%"=="%ENV_DIR%" (
     call "%CONDA_ROOT%\Scripts\activate.bat" "%ENV_DIR%"
 )
 if /i not "%CONDA_PREFIX%"=="%ENV_DIR%" (
-    echo ERROR: could not activate %ENV_DIR%
+    echo ERROR: could not activate "%ENV_DIR%"
     echo Try again, or activate it yourself in an Anaconda Prompt and run
     echo "python -m sem_analysis_app" from here.
     exit /b 1

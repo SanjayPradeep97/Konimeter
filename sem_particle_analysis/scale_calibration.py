@@ -35,6 +35,7 @@ VALID_NM_PER_PX = (0.005, 200_000.0)
 
 METHOD_LABELS = {
     "metadata": "file metadata",
+    "tiff_resolution": "TIFF resolution tag",
     "box_ocr": "scale bar read in box",
     "two_points": "two points clicked on the bar",
     "manual": "entered by hand",
@@ -156,6 +157,19 @@ def from_metadata(detector, file_path):
     conversion = result.get("conversion")
     if not conversion:
         raise ScaleError("No pixel size in the file metadata")
+
+    if result.get("generic_resolution"):
+        # Usually a print resolution, so not trusted until someone has checked
+        # it against the bar.
+        return ScaleCalibration(
+            nm_per_px=float(conversion),
+            method="tiff_resolution",
+            detail="the TIFF's resolution tag",
+            warning=("Most programs set this tag to a print resolution, not the "
+                     "microscope's pixel size. Check it against the scale bar."),
+            extra={"raw": {k: v for k, v in result.items()
+                           if k in ("manufacturer", "source", "scale_nm")}},
+        )
 
     return ScaleCalibration(
         nm_per_px=float(conversion),
@@ -299,6 +313,8 @@ def measured_span(calibration):
     if coords is not None and len(coords) == 3 and box is not None:
         # line_coords are relative to the crop the detector was handed; the box
         # is where that crop sat in the frame.
+        # Pixel edges rather than centres, so the span is as long as the
+        # pixel length the reading was divided by.
         left, right, row = (float(v) for v in coords)
-        return ((box[0] + left, box[1] + row), (box[0] + right, box[1] + row))
+        return ((box[0] + left, box[1] + row), (box[0] + right + 1, box[1] + row))
     return None

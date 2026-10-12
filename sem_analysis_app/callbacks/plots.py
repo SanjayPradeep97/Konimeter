@@ -18,29 +18,26 @@ def update_histogram_plots():
         if len(results_df) == 0:
             return None, "❌ No saved results to plot. Save at least one image's results first."
 
-        # Collect all particle measurements from all images
-        all_areas = []
-        all_diameters = []
-
-        for idx, row in results_df.iterrows():
-            # Parse the string lists back to arrays
+        # Only frames saved with a scale have sizes in nm. Those saved without
+        # one are in pixels and cannot share an axis with them, so they are left
+        # out, and the status says how many.
+        all_areas, all_diameters = [], []
+        for _, row in results_df.iterrows():
             all_areas.extend(parse_measurement_list(row['particle_areas_nm2']))
             all_diameters.extend(parse_measurement_list(row['equiv_diameters_nm']))
+        total = int(results_df['num_particles'].sum())
 
-        total_particles = len(all_areas)
+        if not all_areas:
+            return None, ("❌ No frame has been saved with a scale yet, so there "
+                          "are no sizes in nm to plot.")
 
-        if total_particles == 0:
-            return None, "❌ No particles found in saved results"
-
-        # Create combined measurements dictionary
         combined_measurements = {
-            'num_particles': total_particles,
+            'num_particles': len(all_areas),
             'areas': all_areas,
             'diameters': all_diameters,
             'unit': 'nm'
         }
 
-        # Create histograms
         # Relative, like every other import in this package. As an absolute
         # import this resolved only if the working directory happened to be
         # sem_analysis_app, so the Plots tab reported "No module named
@@ -48,7 +45,13 @@ def update_histogram_plots():
         from ..visualization import create_histogram_plots
         histogram_img = create_histogram_plots(combined_measurements)
 
-        return histogram_img, f"✅ Generated histograms for {total_particles} particles from {len(results_df)} images"
+        images = len(results_df)
+        status = (f"✅ {len(all_areas)} particle{'' if len(all_areas) == 1 else 's'} "
+                  f"from {images} image{'' if images == 1 else 's'}")
+        if len(all_areas) < total:
+            status += (f". {total - len(all_areas)} more are in frames saved without "
+                       "a scale, measured in pixels, and are not plotted.")
+        return histogram_img, status
 
     except Exception as e:
         return None, f"❌ Error: {str(e)}"

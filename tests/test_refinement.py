@@ -83,12 +83,12 @@ class TestASelectionSurvivesARelabel:
 
         apply_refinement_changes()
 
-        # The deleted one is gone and both survivors are still there — a merge
-        # of two far-apart particles cannot join them, but it must not have
-        # touched anything else either.
+        # The deleted one is gone, and the merge joined the two it was asked
+        # to rather than whichever particles inherited their numbers.
         assert label_at(state.analyzer, doomed) == 0
         assert label_at(state.analyzer, keep_a) != 0
-        assert label_at(state.analyzer, keep_b) != 0
+        assert label_at(state.analyzer, keep_a) == label_at(state.analyzer, keep_b)
+        assert len(state.analyzer.regions) == 1
 
     def test_the_right_particle_is_redrawn_after_a_delete(self, three_particles):
         from sem_analysis_app.callbacks.refinement import apply_refinement_changes
@@ -133,7 +133,7 @@ class TestASelectionSurvivesARelabel:
 
         _viz, _df, status, _r, _s = apply_refinement_changes()
 
-        assert "Deleted 1 particles" in status
+        assert "Deleted 1 particle |" in status
         # Only one of the two merge targets still exists, so the merge is
         # reported as impossible rather than applied to something else.
         assert "at least 2" in status
@@ -265,8 +265,6 @@ class TestAParticleWithAHoleIsDrawnWithIt:
     def test_the_hole_is_not_counted_in_the_area(self):
         # The measurement side was always right; this pins it down so the two
         # cannot drift apart again.
-        from skimage import measure
-
         mask, _ = self.ring()
         analyzer = ParticleAnalyzer(conversion_factor=1.0, min_size=30)
         analyzer.analyze_mask(mask, remove_border=False)

@@ -248,6 +248,10 @@ class ResultsManager:
         # which is exactly what resuming someone else's results file does.
         if not os.path.exists(self.csv_file):
             self._create_csv()
+        # From disk, not from memory: a row deleted in a spreadsheet while the
+        # app was open must not be written back by the next save.
+        self.results_df = self._load_data()
+        self._end_with_newline()
 
         if replace and len(self.results_df):
             stem = os.path.splitext(str(file_name))[0]
@@ -272,6 +276,40 @@ class ResultsManager:
         print(f"Stored results for '{file_name}' - {num_particles} particles detected")
         return True
 
+    def _end_with_newline(self):
+        """
+        Make sure the file ends with a line break before a row is appended.
+
+        A file last saved by a spreadsheet often does not, and the appended row
+        then runs on from the last one, corrupting both.
+        """
+        with open(self.csv_file, "rb+") as handle:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                return
+            handle.seek(-1, os.SEEK_END)
+            if handle.read(1) not in (b"\n", b"\r"):
+                handle.write(os.linesep.encode())
+
+    def delete_frame(self, file_name):
+        """
+        Delete the rows recorded for one image, by its file name.
+
+        By name rather than by position, so a list that has been reordered since
+        it was shown, by a re-save or a duplicate removal, cannot delete a
+        different image's row.
+
+        Returns:
+            int: How many rows were deleted.
+        """
+        frame = self._load_data()
+        keep = frame["file_name"].astype(str) != str(file_name)
+        deleted = int((~keep).sum())
+        if deleted:
+            self._rewrite(frame[keep])
+        self.results_df = self._load_data()
+        return deleted
+
     def get_results(self):
         """
         Get all results as a DataFrame.
@@ -294,12 +332,12 @@ class ResultsManager:
         Raises:
             IndexError: If index is out of range
         """
+        self.results_df = self._load_data()
         if index not in self.results_df.index:
             raise IndexError(f"Index {index} not found in results")
 
         # Remove row and save
-        self.results_df = self.results_df.drop(index=index)
-        self.results_df.to_csv(self.csv_file, index=False)
+        self._rewrite(self.results_df.drop(index=index))
 
         # Reload to reset indices
         self.results_df = self._load_data()
@@ -337,11 +375,11 @@ class ResultsManager:
         Returns:
             int: Number of duplicates deleted
         """
+        self.results_df = self._load_data()
         initial_count = len(self.results_df)
 
         # Remove duplicates
-        self.results_df = self.results_df.drop_duplicates(subset='file_name', keep=keep)
-        self.results_df.to_csv(self.csv_file, index=False)
+        self._rewrite(self.results_df.drop_duplicates(subset='file_name', keep=keep))
 
         # Reload to reset indices
         self.results_df = self._load_data()

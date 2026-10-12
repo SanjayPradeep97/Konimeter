@@ -5,9 +5,11 @@ Analyzes segmented particles and calculates size measurements.
 """
 
 import numpy as np
-from skimage import measure, morphology
+from scipy import ndimage as ndi
+from skimage import draw, measure, morphology
 
-from ._compat import binary_closing, binary_opening, remove_objects_smaller_than
+from ._compat import (binary_closing, binary_dilation, binary_opening,
+                      remove_objects_smaller_than)
 
 
 def equivalent_diameter(region):
@@ -50,19 +52,26 @@ class ParticleAnalyzer:
         self.mask = None
         self.labeled_mask = None
         self.regions = []
-        # Set by merge_particles: closing can fail to join distant particles.
+        # How analyze_mask treated the frame edge, so that a particle added or
+        # redrawn later is held to the same rule and measures as it would have
+        # done had SAM found it in the first place.
+        self.remove_border = False
+        self.border_buffer = 4
+        # Set by merge_particles: whether the last merge was carried out, and how
+        # many pixels it added to close the gaps between the pieces.
         self.last_merge_succeeded = True
+        self.last_merge_added_px = 0
 
     @staticmethod
     def _clean_mask(mask, min_size):
         """
-        Morphological cleanup applied to every mask before measurement.
+        Morphological cleanup: a radius-1 opening, then the size filter.
 
-        Both the initial analysis and each refinement operation run this, so a
-        given particle measures the same regardless of how many times the mask
-        has been edited. The opening alone shifts the area of a ragged SAM mask
-        by a few percent, so applying it on one path but not the other would make
-        reported areas depend on whether the user happened to touch refinement.
+        Applied to everything that enters the mask — the initial analysis and
+        each particle added or redrawn — but never again to particles already
+        measured. The opening alone shifts the area of a ragged SAM mask by a few
+        percent, so a particle has to have been through it exactly once, however
+        it got into the mask.
 
         Args:
             mask (np.ndarray): Binary mask
@@ -74,25 +83,43 @@ class ParticleAnalyzer:
         cleaned = binary_opening(mask.astype(bool), morphology.disk(1))
         return remove_objects_smaller_than(cleaned, min_size)
 
-    def _relabel_and_filter(self):
+    def _prepare(self, mask, min_size, remove_border, border_buffer):
         """
-        Relabel mask and filter by size consistently to prevent fake particles.
+        Everything a mask goes through before its pixels may be measured.
 
-        This method applies morphological cleanup and size filtering to remove
-        noise and small artifacts that can appear after particle operations.
+        The cleanup runs again after the border strip is cut. Cutting a ragged
+        particle off at the strip leaves shreds the opening would have removed,
+        and while they stayed the result was not a fixed point of its own
+        cleanup — re-cleaning the mask, which every edit used to do, changed the
+        areas of particles nobody had touched. Running it again makes the output
+        a fixed point: preparing it a second time changes nothing.
 
         Returns:
-            int: Number of particles after filtering
+            np.ndarray: Boolean mask in which every connected component is a
+            particle.
         """
-        self.mask = self._clean_mask(self.mask, self.min_size)
+        cleaned = self._clean_mask(mask, min_size)
+        if remove_border:
+            cleaned = self._remove_border_artifacts(cleaned, border_buffer)
+            cleaned = self._clean_mask(cleaned, min_size)
+            cleaned = self._remove_edge_slivers(cleaned)
+        return cleaned
 
-        # Relabel
+    def _relabel(self):
+        """
+        Relabel the mask and measure every connected component in it.
+
+        Nothing is cleaned or filtered here. Everything that enters the mask has
+        already been prepared, so every component is a particle, and cleaning
+        the whole mask again after each edit is what used to change the areas
+        of particles the edit never touched — and made Undo come back with
+        different numbers from the ones it was undoing to.
+
+        Returns:
+            int: Number of particles.
+        """
         self.labeled_mask = measure.label(self.mask, connectivity=2)
-
-        # Get all regions and filter by minimum size
-        all_regions = measure.regionprops(self.labeled_mask)
-        self.regions = [r for r in all_regions if r.area >= self.min_size]
-
+        self.regions = measure.regionprops(self.labeled_mask)
         return len(self.regions)
 
     def analyze_mask(self, mask, min_size=None, remove_border=True,
@@ -103,8 +130,10 @@ class ParticleAnalyzer:
         Args:
             mask (np.ndarray): Binary mask (particles as True/1)
             min_size (int, optional): Minimum particle size in pixels. Uses instance default if None.
-            remove_border (bool): Whether to remove border-touching particles
-            border_buffer (int): Buffer width for border removal (pixels)
+            remove_border (bool): Clear a ``border_buffer``-wide strip round the
+                frame and drop slivers hugging the edge. A particle crossing the
+                edge is kept, clipped at the strip, not removed.
+            border_buffer (int): Width of that strip (pixels)
 
         Returns:
             tuple: (num_particles, regions)
@@ -115,26 +144,9 @@ class ParticleAnalyzer:
         if min_size is None:
             min_size = self.min_size
 
-        # Same cleanup the refinement operations use, so measurements don't shift
-        # the first time a mask is edited.
-        clean_mask = self._clean_mask(mask, min_size)
-
-        # Remove border artifacts
-        if remove_border:
-            clean_mask = self._remove_border_artifacts(clean_mask, border_buffer)
-            clean_mask = self._remove_edge_slivers(clean_mask)
-
-        # Label connected components
-        self.labeled_mask = measure.label(clean_mask, connectivity=2)
-
-        # Get region properties
-        all_regions = measure.regionprops(self.labeled_mask)
-
-        # Filter by minimum size
-        self.regions = [r for r in all_regions if r.area >= min_size]
-        self.mask = clean_mask
-
-        num_particles = len(self.regions)
+        self.remove_border, self.border_buffer = remove_border, border_buffer
+        self.mask = self._prepare(mask, min_size, remove_border, border_buffer)
+        num_particles = self._relabel()
         print(f"Detected {num_particles} particles")
 
         return num_particles, self.regions
@@ -288,18 +300,30 @@ class ParticleAnalyzer:
         if self.labeled_mask is None:
             raise RuntimeError("No labeled mask available. Run analyze_mask() first.")
 
-        # Create deletion mask
+        # Removing whole components leaves every other particle exactly as it was.
         delete_mask = np.isin(self.labeled_mask, labels_to_delete)
         self.mask = self.mask & (~delete_mask)
-
-        # Relabel with filtering to prevent fake particles
-        self._relabel_and_filter()
+        self._relabel()
 
         return len(labels_to_delete)
 
     def merge_particles(self, labels_to_merge):
         """
-        Merge multiple particles into a single particle.
+        Merge several particles into one.
+
+        Particles a pixel or two apart are joined along their seam by a radius-1
+        closing, as they always were. Pieces still apart after that — the
+        fragments of one broken particle usually are — are joined by straight
+        bridges one or two pixels wide between their closest points, chained so
+        that every piece ends up in one connected particle. The bridges are as
+        thin as a join allows, but they are part of the merged particle and
+        their pixels count towards its area; ``last_merge_added_px`` says how
+        many pixels the closing and the bridges added.
+
+        Neither may take in a particle that was not selected. The closing is
+        kept off the pixels next to one; a bridge that would run into one makes
+        the merge refused instead, the mask left as it was and
+        ``last_merge_succeeded`` False.
 
         Args:
             labels_to_merge (list): List of region labels to merge
@@ -314,63 +338,129 @@ class ParticleAnalyzer:
             print("Warning: Need at least 2 particles to merge")
             return len(self.regions)
 
-        # Create merge mask
-        merge_mask = np.isin(self.labeled_mask, labels_to_merge)
+        selected = np.isin(self.labeled_mask, labels_to_merge)
+        others = self.mask & ~selected
+        closed = (binary_closing(selected, morphology.disk(1))
+                  & ~binary_dilation(others, np.ones((3, 3), dtype=bool)))
+        bridges = self._bridges(closed)
+        merged = self.mask | closed | bridges
 
-        # Apply morphological closing to bridge gaps
-        merge_mask_closed = binary_closing(merge_mask.astype(bool), morphology.disk(1))
+        components = measure.label(merged, connectivity=2)
+        pieces = np.unique(components[selected])
+        self.last_merge_succeeded = (
+            len(pieces) == 1 and not (components[others] == pieces[0]).any())
+        if not self.last_merge_succeeded:
+            self.last_merge_added_px = 0
+            print("Could not merge: joining the selected particles would take in "
+                  "a particle that was not selected.")
+            return len(self.regions)
 
-        # Update main mask
-        self.mask = (self.mask & (~merge_mask)) | merge_mask_closed
-
-        # Relabel with filtering to prevent fake particles
-        before = len(self.regions)
-        self._relabel_and_filter()
-
-        # Closing only bridges gaps of a pixel or two. Particles further apart
-        # come back as separate components, so the merge silently did nothing —
-        # report that rather than claiming success.
-        expected = before - (len(labels_to_merge) - 1)
-        self.last_merge_succeeded = len(self.regions) <= expected
-        if self.last_merge_succeeded:
-            print(f"Merged {len(labels_to_merge)} particles. New count: {len(self.regions)}")
-        else:
-            print(f"Could not merge: the selected particles are too far apart to "
-                  f"join. Count unchanged at {len(self.regions)}.")
+        self.last_merge_added_px = int((merged & ~self.mask).sum())
+        self.mask = merged
+        self._relabel()
+        print(f"Merged {len(labels_to_merge)} particles, adding "
+              f"{self.last_merge_added_px} px. New count: {len(self.regions)}")
         return len(self.regions)
 
-    def add_particle_from_sam(self, sam_mask, largest_only=False):
+    @staticmethod
+    def _bridges(pieces):
+        """
+        Thin straight bridges joining every component of ``pieces`` into one.
+
+        Grown like a minimum spanning tree: the piece nearest to everything
+        joined so far is linked to it by a line between its closest pixel and
+        the joined pixel nearest that, until no piece is left. Each line is
+        thickened at its diagonal steps so that it is 4-connected, and so reads
+        as one piece whatever connectivity it is later read with.
+
+        Args:
+            pieces (np.ndarray): Boolean mask of the pieces to join.
+
+        Returns:
+            np.ndarray: Boolean mask of the bridge pixels only.
+        """
+        bridges = np.zeros(pieces.shape, dtype=bool)
+        rows, cols = np.nonzero(pieces)
+        if not len(rows):
+            return bridges
+        # Every closest pair lies inside the pieces' bounding box, so the
+        # distance transforms need not run over the whole frame.
+        box = (slice(rows.min(), rows.max() + 1), slice(cols.min(), cols.max() + 1))
+        components = measure.label(pieces[box], connectivity=2)
+        remaining = set(range(2, components.max() + 1))
+        joined = components == 1
+        lines = np.zeros(joined.shape, dtype=bool)
+        while remaining:
+            distance, (near_rows, near_cols) = ndi.distance_transform_edt(
+                ~joined, return_indices=True)
+            candidates = np.isin(components, list(remaining))
+            row, col = np.unravel_index(
+                np.where(candidates, distance, np.inf).argmin(), distance.shape)
+            rr, cc = draw.line(row, col, near_rows[row, col], near_cols[row, col])
+            lines[rr, cc] = True
+            lines[rr[1:], cc[:-1]] = True
+            piece = components[row, col]
+            joined |= (components == piece) | lines
+            remaining.discard(piece)
+        bridges[box] = lines & (components == 0)
+        return bridges
+
+    def prepare_addition(self, mask, largest_only=False, region=None):
+        """
+        The pixels that adding ``mask`` would actually contribute.
+
+        Put through what the initial analysis applied: restricted to the
+        analysable region, cleaned, cut at the same border strip. A particle
+        added or redrawn by hand used to skip all of it, so a burned-in scale
+        bar could be added and measured, and a particle re-added at the frame
+        edge measured larger than the same particle had the first time.
+
+        The Redraw preview is checked with this too, so a preview that passes
+        is exactly what Apply will add.
+
+        Args:
+            mask (np.ndarray): Boolean mask, usually from SAM.
+            largest_only (bool): Keep only the biggest connected component. Use
+                when the mask is meant to be one particle — refining a single
+                particle otherwise multiplies the count, because SAM often
+                returns several disconnected blobs and every one becomes a
+                particle of its own.
+            region (np.ndarray, optional): Analysable region; pixels outside it
+                are dropped. Ignored when its shape does not match the mask.
+
+        Returns:
+            np.ndarray: Boolean mask, empty when nothing survives.
+        """
+        mask = np.asarray(mask).astype(bool)
+        if region is not None and region.shape == mask.shape:
+            mask = mask & region
+        mask = self._prepare(mask, self.min_size, self.remove_border,
+                             self.border_buffer)
+        if largest_only and mask.any():
+            components = measure.label(mask, connectivity=2)
+            sizes = np.bincount(components.ravel())
+            sizes[0] = 0
+            mask = components == int(sizes.argmax())
+        return mask
+
+    def add_particle_from_sam(self, sam_mask, largest_only=False, region=None):
         """
         Add a new particle from a SAM-generated mask.
 
+        Only the mask's own pixels are cleaned (see ``prepare_addition``); the
+        particles already measured are left exactly as they were.
+
         Args:
             sam_mask (np.ndarray): Boolean mask from SAM
-            largest_only (bool): Keep only the biggest connected component of the
-                mask. Use when the mask is meant to be one particle — refining a
-                single particle otherwise multiplies the count, because SAM often
-                returns several disconnected blobs and every one becomes a
-                particle of its own.
+            largest_only (bool): See ``prepare_addition``.
+            region (np.ndarray, optional): See ``prepare_addition``.
 
         Returns:
             int: New particle count
         """
-        sam_mask = sam_mask.astype(bool)
-
-        if largest_only and sam_mask.any():
-            components = measure.label(sam_mask, connectivity=2)
-            regions = measure.regionprops(components)
-            if len(regions) > 1:
-                biggest = max(regions, key=lambda r: r.area)
-                sam_mask = components == biggest.label
-
-        if self.mask is None:
-            self.mask = sam_mask
-        else:
-            # Union with existing mask
-            self.mask = self.mask | sam_mask
-
-        # Relabel with filtering to prevent fake particles
-        self._relabel_and_filter()
+        added = self.prepare_addition(sam_mask, largest_only, region)
+        self.mask = added if self.mask is None else (self.mask | added)
+        self._relabel()
 
         print(f"Added particle. New count: {len(self.regions)}")
         return len(self.regions)

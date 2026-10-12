@@ -113,6 +113,11 @@ def select_mask_and_analyze(mask_choice, progress=gr.Progress()):
             conversion_factor=conversion,
             min_size=state.min_particle_size
         )
+        # A new analysis starts with a clean slate. Queued clicks and both undo
+        # stacks belonged to the previous candidate's mask: kept, a queued click
+        # was applied to this one, and Undo stepped back into the old candidate.
+        state.clear_pending_edits()
+        state.mask_history = []
 
         # Candidates already carry the polarity that made them win the ranking.
         # Re-deriving it here with a hardcoded invert=True silently analysed the
@@ -152,7 +157,8 @@ def select_mask_and_analyze(mask_choice, progress=gr.Progress()):
 
         progress(1.0, desc="Complete!")
 
-        status = (f"✅ Detected {num_particles} particles ({measurements['unit']}) "
+        noun = "particle" if num_particles == 1 else "particles"
+        status = (f"✅ Detected {num_particles} {noun} ({measurements['unit']}) "
                   f"- Ready for refinement")
         if conversion is None:
             status += " ⚠️ no scale, sizes are in pixels"

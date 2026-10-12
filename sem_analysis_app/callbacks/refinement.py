@@ -11,10 +11,28 @@ from ..visualization import (
     create_summary_statistics_table,
 )
 from ..state import state
-from sem_particle_analysis._compat import remove_objects_smaller_than
 
 # How much room to leave round the region SAM is asked to answer in.
 ROI_PAD_PX = 10
+
+
+def _plural(count, noun):
+    """'1 particle', '2 particles'."""
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _analysable():
+    """The specimen part of the frame; anything drawn outside it is dropped."""
+    return getattr(state, "analysable_region", None)
+
+
+def _nothing_left_reason(raw):
+    """Why a mask from SAM contributed nothing once prepared for measurement."""
+    if not raw.any():
+        return "SAM found nothing there"
+    return (f"nothing of it survives the cleanup every particle gets (at least "
+            f"{state.analyzer.min_size} px and 3 px wide, inside the analysable "
+            f"area, clear of the frame-edge strip)")
 
 
 def roi_box(base_mask, points, shape, pad=ROI_PAD_PX):
@@ -97,9 +115,11 @@ def handle_image_click(evt: gr.SelectData):
                     # Save pending state before modification (for undo of this click)
                     state.save_pending_state()
                     state.pending_deletes.append(label)
-                    # Anchored to the pixel clicked, so this stays the same
-                    # particle even after an earlier edit renumbers the mask.
-                    state.anchor_selection(label, (x, y))
+                    # Anchored to a pixel of the particle, so this stays the
+                    # same particle even after an earlier edit renumbers the
+                    # mask — and a near miss is not lost at Apply.
+                    state.anchor_selection(label, (x, y),
+                                           state.analyzer.labeled_mask)
 
                 particle_viz = create_particle_visualization(
                     state.cropped_image,
@@ -116,9 +136,6 @@ def handle_image_click(evt: gr.SelectData):
         elif state.click_mode == "add":
             # ADD MODE: Click to add a single particle at this location
             try:
-                # Save pending state before modification (for undo of this click)
-                state.save_pending_state()
-
                 # Encoding is skipped when this image is already the encoded
                 # one, so asking costs nothing and saves the caller tracking it.
                 state.segmenter.encode_image(state.cropped_image)
@@ -133,8 +150,20 @@ def handle_image_click(evt: gr.SelectData):
                     image_already_encoded=True
                 )
 
+                # Queued as it will be measured: restricted to the specimen and
+                # cleaned like every other particle. SAM is happy to segment a
+                # burned-in scale bar, and that must not become a particle.
+                added = state.analyzer.prepare_addition(refined_mask,
+                                                        region=_analysable())
+                if not added.any():
+                    return (get_current_visualization(),
+                            f"⚠️ Nothing to add here — "
+                            f"{_nothing_left_reason(refined_mask)}.")
+
+                # Save pending state before modification (for undo of this click)
+                state.save_pending_state()
                 state.pending_add_points.append((x, y))
-                state.pending_add_masks.append(refined_mask)
+                state.pending_add_masks.append(added)
 
                 particle_viz = create_particle_visualization(
                     state.cropped_image,
@@ -156,7 +185,8 @@ def handle_image_click(evt: gr.SelectData):
                     # Save pending state before modification (for undo of this click)
                     state.save_pending_state()
                     state.pending_merge.append(label)
-                    state.anchor_selection(label, (x, y))
+                    state.anchor_selection(label, (x, y),
+                                           state.analyzer.labeled_mask)
 
                 # Visualization will show selected particles in different color
                 particle_viz = create_particle_visualization(
@@ -167,7 +197,9 @@ def handle_image_click(evt: gr.SelectData):
                     pending_add_masks=state.pending_add_masks,
                     pending_merge=state.pending_merge
                 )
-                return particle_viz, f"🔵 Selected {len(state.pending_merge)} particles for merging"
+                return particle_viz, (f"🔵 Selected "
+                                      f"{_plural(len(state.pending_merge), 'particle')} "
+                                      f"for merging")
             else:
                 return get_current_visualization(), "No particle found at this location"
 
@@ -185,7 +217,8 @@ def handle_image_click(evt: gr.SelectData):
                 if region is not None:
                     # User clicked on existing particle - use it as base mask for IoU selection
                     state.point_refine_particle = label
-                    state.anchor_selection(label, (x, y))
+                    state.anchor_selection(label, (x, y),
+                                           state.analyzer.labeled_mask)
                     state.point_refine_base_mask = (state.analyzer.labeled_mask == label).astype(bool)
                 # If no particle found, that's OK - user is creating a new particle from scratch
 
@@ -236,29 +269,26 @@ def handle_image_click(evt: gr.SelectData):
                     refined_mask = masks_out[best_idx].astype(bool)
                     state.point_refine_logits = logits_out[best_idx]  # Store for next iteration
 
-                # remove_objects_smaller_than, not skimage's remove_small_objects:
-                # since 0.26 that one drops objects smaller than *or equal to*
-                # min_size, so the boundary case silently lost a particle of
-                # exactly the minimum size.
+                # The preview is what Apply will add, prepared exactly as Apply
+                # prepares it. It used to be checked against the slider's size
+                # alone while Apply also cleaned and used the size fixed when
+                # the candidate was chosen, so a preview that passed could
+                # still come to nothing — and Apply deleted the particle being
+                # redrawn and added nothing back.
                 raw = refined_mask
-                refined_mask = remove_objects_smaller_than(
-                    refined_mask, state.min_particle_size)
+                refined_mask = state.analyzer.prepare_addition(
+                    refined_mask,
+                    largest_only=state.point_refine_particle is not None,
+                    region=_analysable())
 
                 if not refined_mask.any():
-                    # Do not store an empty preview. Apply would take it as a
-                    # refinement, delete the particle being refined and add
-                    # nothing back — the particle would simply disappear.
+                    # Do not store an empty preview: there is nothing to apply.
                     state.point_refine_preview_mask = None
-                    if raw.any():
-                        reason = (f"the region drawn is under the "
-                                  f"{state.min_particle_size} px minimum size")
-                    else:
-                        reason = "SAM found nothing for these points"
                     return (create_point_refine_visualization(
                         state.cropped_image, raw, state.point_refine_points,
                         state.point_refine_labels),
-                        f"⚠️ No preview — {reason}. Add another point, or "
-                        f"lower the minimum size.")
+                        f"⚠️ No preview — {_nothing_left_reason(raw)}. Add "
+                        f"another point, or lower the smallest particle size.")
 
                 # Store as preview (will be applied when user clicks Apply)
                 state.point_refine_preview_mask = refined_mask
@@ -287,9 +317,24 @@ def handle_image_click(evt: gr.SelectData):
 
 
 def set_min_particle_size(size):
-    """Set minimum particle size for filtering."""
-    state.min_particle_size = int(size)
-    return f"✓ Minimum particle size set to {int(size)} pixels"
+    """
+    Set the smallest particle, for the next analysis and for edits from now on.
+
+    Kept in step with the analyzer, which is what Apply cleans with. The two
+    used to drift apart: the slider never reached the analyzer, so a Redraw
+    preview checked against the slider could pass and then come to nothing at
+    Apply. Particles already measured are not refiltered — an edit never
+    changes a particle it did not touch — so the new size applies to what is
+    added or redrawn, and to the next candidate chosen.
+    """
+    size = int(size)
+    state.min_particle_size = size
+    if state.analyzer is None:
+        return f"✓ Smallest particle set to {size} px"
+    state.analyzer.min_size = size
+    return (f"✓ Smallest particle set to {size} px for particles added or "
+            f"redrawn from now on — choose the candidate again to refilter "
+            f"the ones already measured")
 
 
 def toggle_particle_numbers(show_numbers):
@@ -336,6 +381,10 @@ def reset_point_refine():
 def set_click_mode(mode):
     """Set click mode and return status message."""
     state.click_mode = mode
+    # The per-click history describes the tool just left: undoing into it
+    # brought an abandoned Redraw or Merge back as a hidden edit that the next
+    # Apply then carried out. Dropped, as Apply drops it.
+    state.undo_history = []
 
     # Reset mode-specific state
     if mode != "merge":
@@ -389,45 +438,58 @@ def apply_refinement_changes(progress=gr.Progress()):
 
         # Apply deletions
         if state.pending_deletes:
-            progress(0.2, desc=f"Deleting {len(state.pending_deletes)} particles...")
+            progress(0.2, desc=f"Deleting {_plural(len(state.pending_deletes), 'particle')}...")
             targets = selected(state.pending_deletes)
             if targets:
                 state.analyzer.delete_particles(targets)
-                status_messages.append(f"Deleted {len(targets)} particles")
+                status_messages.append(f"Deleted {_plural(len(targets), 'particle')}")
                 changes_made = True
             state.pending_deletes = []
 
-        # Apply additions using pre-generated masks
+        # Apply additions. Prepared again rather than trusted as queued: the
+        # smallest-particle size may have changed since the click.
         if state.pending_add_masks:
-            progress(0.4, desc=f"Adding {len(state.pending_add_masks)} particles...")
+            progress(0.4, desc=f"Adding {_plural(len(state.pending_add_masks), 'particle')}...")
+            added = 0
             for add_mask in state.pending_add_masks:
-                state.analyzer.add_particle_from_sam(add_mask)
-            status_messages.append(f"Added {len(state.pending_add_masks)} particles")
+                pixels = state.analyzer.prepare_addition(add_mask, region=_analysable())
+                if pixels.any():
+                    state.analyzer.add_particle_from_sam(pixels)
+                    added += 1
+            skipped = len(state.pending_add_masks) - added
+            if added:
+                status_messages.append(f"Added {_plural(added, 'particle')}")
+                changes_made = True
+            if skipped:
+                status_messages.append(
+                    f"⚠️ {_plural(skipped, 'addition')} left out — nothing "
+                    f"survived the cleanup every particle gets")
             state.pending_add_points = []
             state.pending_add_masks = []
-            changes_made = True
 
         # Apply merge
         if state.pending_merge:
-            progress(0.6, desc=f"Merging {len(state.pending_merge)} particles...")
+            progress(0.6, desc=f"Merging {_plural(len(state.pending_merge), 'particle')}...")
             targets = selected(state.pending_merge)
             state.pending_merge = []
             if len(targets) >= 2:
                 state.analyzer.merge_particles(targets)
-                if getattr(state.analyzer, "last_merge_succeeded", True):
-                    status_messages.append(f"Merged {len(targets)} particles")
+                if state.analyzer.last_merge_succeeded:
+                    status_messages.append(
+                        f"Merged {_plural(len(targets), 'particle')} "
+                        f"(+{state.analyzer.last_merge_added_px} px joining them)")
+                    changes_made = True
                 else:
                     status_messages.append(
-                        f"⚠️ Could not merge {len(targets)} particles — they "
-                        f"are too far apart to join"
-                    )
-                changes_made = True
+                        f"⚠️ Did not merge {_plural(len(targets), 'particle')} — "
+                        f"joining them would take in a particle you did not "
+                        f"select. Select it too, or Redraw instead")
             else:
                 status_messages.append("⚠️ Need at least 2 particles to merge")
 
         # Apply point refinement
         preview = state.point_refine_preview_mask
-        if preview is not None and preview.any():
+        if preview is not None:
             progress(0.7, desc="Applying point refinement...")
 
             # Resolved here, not at click time: deletes and merges above have
@@ -436,18 +498,31 @@ def apply_refinement_changes(progress=gr.Progress()):
                                           state.analyzer.labeled_mask)
                       if state.point_refine_particle is not None else None)
             refining_existing = target is not None
-            if refining_existing:
-                # Refining existing particle - delete old and add refined one
-                state.analyzer.delete_particles([target])
-                status_messages.append(f"Refined particle with {len(state.point_refine_points)} points")
-            else:
-                # Creating new particle from scratch
-                status_messages.append(f"Created new particle with {len(state.point_refine_points)} points")
 
-            # Refining one particle must yield one particle. SAM's mask often has
-            # stray disconnected blobs, and unioning those in turns a single
-            # refinement into several new particles.
-            state.analyzer.add_particle_from_sam(preview, largest_only=refining_existing)
+            # Prepared before anything is deleted, so that a redraw which comes
+            # to nothing is refused instead of removing the particle and adding
+            # nothing back. Refining one particle must yield one particle:
+            # SAM's mask often has stray disconnected blobs, and unioning those
+            # in turns a single refinement into several new particles.
+            replacement = state.analyzer.prepare_addition(
+                preview, largest_only=refining_existing, region=_analysable())
+            points = _plural(len(state.point_refine_points), 'point')
+            if not preview.any():
+                status_messages.append(
+                    "⚠️ Nothing to redraw — the preview was empty, so the "
+                    "particle was left as it was")
+            elif not replacement.any():
+                status_messages.append(
+                    f"⚠️ Redraw not applied — {_nothing_left_reason(preview)}. "
+                    f"The particle was left as it was")
+            else:
+                if refining_existing:
+                    state.analyzer.delete_particles([target])
+                    status_messages.append(f"Redrew a particle with {points}")
+                else:
+                    status_messages.append(f"Drew a new particle with {points}")
+                state.analyzer.add_particle_from_sam(replacement)
+                changes_made = True
 
             state.point_refine_particle = None
             state.point_refine_base_mask = None
@@ -455,16 +530,14 @@ def apply_refinement_changes(progress=gr.Progress()):
             state.point_refine_labels = []
             state.point_refine_preview_mask = None
             state.point_refine_logits = None
-            changes_made = True
-        elif preview is not None:
-            # An empty preview is not a refinement. Applying it used to delete
-            # the particle being refined and add nothing back.
-            status_messages.append(
-                "⚠️ Nothing to redraw — the preview was empty, so the "
-                "particle was left as it was")
-            state.point_refine_preview_mask = None
 
-        state.pending_anchors = {}
+        if state.point_refine_particle is None:
+            state.pending_anchors = {}
+        elif changes_made:
+            # A redraw still being drawn, with no preview yet, outlives this
+            # Apply. The edits above renumbered the mask, so point it at its
+            # particle again.
+            state.reindex_pending(state.analyzer.labeled_mask)
 
         if not changes_made:
             # Nothing happened, so the snapshot taken above is dead weight.
@@ -472,8 +545,11 @@ def apply_refinement_changes(progress=gr.Progress()):
                 state.mask_history.pop()
             # Say *why* nothing happened when there is a reason. Reporting a bare
             # "No changes to apply" over the top of it is what made a redraw that
-            # produced nothing look like a button that does nothing.
-            return (gr.update(), gr.update(),
+            # produced nothing look like a button that does nothing. The view is
+            # redrawn so outlines of selections just used up go away, unless a
+            # redraw is still in progress and showing its own points.
+            viz = gr.update() if state.point_refine_points else get_current_visualization()
+            return (viz, gr.update(),
                     " | ".join(status_messages) or "No changes to apply",
                     gr.update(), gr.update())
 
@@ -499,7 +575,8 @@ def apply_refinement_changes(progress=gr.Progress()):
         progress(1.0, desc="Complete!")
 
         num_particles = len(state.analyzer.regions)
-        status = f"✅ {' | '.join(status_messages)} | Total: {num_particles} particles"
+        status = (f"✅ {' | '.join(status_messages)} | "
+                  f"Total: {_plural(num_particles, 'particle')}")
 
         # Return: refine_viz, refine_results, refine_status, current_results, current_stats
         return (
@@ -515,27 +592,37 @@ def apply_refinement_changes(progress=gr.Progress()):
 
 
 def undo_last_action():
-    """Undo the last click (removes last item from pending changes)."""
+    """
+    Undo the last click, or the last Apply when no clicks are queued.
+
+    Returns:
+        tuple: (refine_viz, refine_results, refine_status, current_results,
+        current_stats), as apply_refinement_changes does — undoing an Apply
+        changes the measurements, and the Results tab has to follow.
+    """
     try:
         if state.analyzer is None:
-            return gr.update(), gr.update(), "❌ No analysis available"
+            return (gr.update(), gr.update(), "❌ No analysis available",
+                    gr.update(), gr.update())
 
         if not state.undo_history:
             # No un-applied clicks left, so step back over the last Apply
             # instead. Without this, applying was a point of no return.
             if state.restore_mask():
-                particle_viz = create_particle_visualization(
-                    state.cropped_image,
-                    state.analyzer.labeled_mask,
-                    state.analyzer.regions,
-                    show_labels=state.show_particle_numbers,
-                )
+                # Clicks still queued (a tool switch keeps deletes and adds)
+                # name labels from before the restore.
+                state.reindex_pending(state.analyzer.labeled_mask)
+                particle_viz = get_current_visualization()
                 measurements = state.analyzer.get_measurements(in_nm=True)
-                return (particle_viz, create_results_dataframe(measurements),
+                results_df = create_results_dataframe(measurements)
+                steps = _plural(len(state.mask_history), 'further step')
+                return (particle_viz, results_df,
                         f"↩️ Undid the last applied change — back to "
-                        f"{len(state.analyzer.regions)} particles "
-                        f"({len(state.mask_history)} further steps available)")
-            return gr.update(), gr.update(), "❌ Nothing left to undo"
+                        f"{_plural(len(state.analyzer.regions), 'particle')} "
+                        f"({steps} available)",
+                        results_df, create_summary_statistics_table(measurements))
+            return (gr.update(), gr.update(), "❌ Nothing left to undo",
+                    gr.update(), gr.update())
 
         # Restore previous pending state (before last click)
         previous_state = state.undo_history.pop()
@@ -574,17 +661,15 @@ def undo_last_action():
                 pending_merge=state.pending_merge
             )
 
-        # Measurements don't change (we're only undoing pending changes)
-        measurements = state.analyzer.get_measurements(in_nm=True)
-        results_df = create_results_dataframe(measurements)
-
+        # Measurements don't change: only queued clicks were undone.
         num_particles = len(state.analyzer.regions)
-        status = f"↩️ Undone last click! {num_particles} particles | {len(state.undo_history)} undo steps remaining"
+        status = (f"↩️ Undone last click! {_plural(num_particles, 'particle')} | "
+                  f"{_plural(len(state.undo_history), 'undo step')} remaining")
 
-        return particle_viz, results_df, status
+        return particle_viz, gr.update(), status, gr.update(), gr.update()
 
     except Exception as e:
-        return gr.update(), gr.update(), f"❌ Error: {str(e)}"
+        return gr.update(), gr.update(), f"❌ Error: {str(e)}", gr.update(), gr.update()
 
 
 def clear_edge_particles(buffer_size):
@@ -629,7 +714,8 @@ def clear_edge_particles(buffer_size):
         stats_df = create_summary_statistics_table(measurements)
 
         num_particles = len(state.analyzer.regions)
-        status = f"✅ Removed {n_removed} edge particles (centroid within {buffer}px of edge) - Now {num_particles} total"
+        status = (f"✅ Removed {_plural(n_removed, 'edge particle')} (centroid within "
+                  f"{buffer}px of edge) - Now {num_particles} total")
 
         # Return: refine_viz, refine_results, refine_status, current_results, current_stats
         return (
@@ -660,18 +746,7 @@ def clear_all_particles():
             state.analyzer.delete_particles(all_labels)
 
         # Clear all pending state too
-        state.pending_deletes = []
-        state.pending_anchors = {}
-        state.pending_add_points = []
-        state.pending_add_masks = []
-        state.pending_merge = []
-        state.point_refine_particle = None
-        state.point_refine_base_mask = None
-        state.point_refine_points = []
-        state.point_refine_labels = []
-        state.point_refine_preview_mask = None
-        state.point_refine_logits = None
-        state.undo_history = []
+        state.clear_pending_edits()
 
         # Redraw (empty image, no particles)
         particle_viz = create_particle_visualization(
@@ -686,7 +761,8 @@ def clear_all_particles():
         results_df = create_results_dataframe(measurements)
         stats_df = create_summary_statistics_table(measurements)
 
-        status = f"🗑️ Cleared all {n_removed} particles. Use 'add' mode to start segmenting."
+        status = (f"🗑️ Cleared {_plural(n_removed, 'particle')}. "
+                  f"Use 'add' mode to start segmenting.")
 
         return particle_viz, results_df, status, results_df, stats_df
 
@@ -697,18 +773,8 @@ def clear_all_particles():
 def clear_pending_changes():
     """Clear all pending changes and redraw visualization."""
     try:
-        state.pending_deletes = []
-        state.pending_anchors = {}
-        state.pending_add_points = []
-        state.pending_add_masks = []
-        state.pending_merge = []
-        state.point_refine_particle = None
-        state.point_refine_base_mask = None
-        state.point_refine_points = []
-        state.point_refine_labels = []
-        state.point_refine_preview_mask = None
-        state.point_refine_logits = None
-        state.undo_history = []  # Clear undo history since all pending changes are cleared
+        # The per-click undo history goes too, since every click it describes is gone.
+        state.clear_pending_edits()
 
         # Redraw visualization without pending changes
         if state.analyzer is not None:

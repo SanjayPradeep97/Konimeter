@@ -2,20 +2,41 @@
 Setup tab: SAM initialisation, and opening a folder of images with its results.
 """
 import os
+import tempfile
+import urllib.error
+
 import gradio as gr
 
 from sem_particle_analysis import (SAMModel, ScaleDetector, ParticleSegmenter,
                                    ResultsManager, discover_checkpoints,
                                    infer_model_type)
 from sem_particle_analysis import weights
+from sem_particle_analysis.model import weights_dir
 from sem_particle_analysis.utils import find_images_in_folder
 from ..state import state
+from .gallery import create_image_gallery
+
+RESULTS_FILENAME = "analysis_results.csv"
 
 # What the checkpoint list says, depending on whether it found any.
 CHECKPOINTS_FOUND = "Found in sam_weights/. Paste a path to use one from elsewhere."
 CHECKPOINTS_MISSING = ("None yet: download the model with the button below, or paste "
                        "the path of a checkpoint you already have.")
-from .gallery import create_image_gallery
+
+
+def clean_path(text):
+    """
+    A path as the analyst pasted it: absolute, with ``~`` expanded.
+
+    Explorer's "Copy as path" wraps the path in double quotes and Finder's
+    Option-Command-C does not, so surrounding quotes and whitespace are dropped.
+
+    Returns:
+        str: The path, or "" for empty input.
+    """
+    text = str(text or "").strip().strip('"').strip("'").strip()
+    return os.path.abspath(os.path.expanduser(text)) if text else ""
+
 
 def resolve_checkpoint(value):
     """
@@ -33,10 +54,10 @@ def resolve_checkpoint(value):
     if not value:
         return None
 
-    text = os.path.expanduser(str(value)).strip()
-    if os.path.exists(text):
+    text = clean_path(value)
+    if os.path.isfile(text):
         return text
-    return next((str(p) for p in discover_checkpoints() if p.name in text), None)
+    return next((str(p) for p in discover_checkpoints() if p.name in str(value)), None)
 
 
 def initialize_sam(sam_path, progress=gr.Progress()):
@@ -72,23 +93,6 @@ def initialize_sam(sam_path, progress=gr.Progress()):
         return f"❌ Error: {str(e)}", gr.update(interactive=False)
 
 
-RESULTS_FILENAME = "analysis_results.csv"
-
-
-def clean_path(text):
-    """
-    A path as the analyst pasted it: absolute, with ``~`` expanded.
-
-    Explorer's "Copy as path" wraps the path in double quotes and Finder's
-    Option-Command-C does not, so surrounding quotes and whitespace are dropped.
-
-    Returns:
-        str: The path, or "" for empty input.
-    """
-    text = str(text or "").strip().strip('"').strip("'").strip()
-    return os.path.abspath(os.path.expanduser(text)) if text else ""
-
-
 def download_model(progress=gr.Progress()):
     """
     Download SAM ViT-B into Konimeter's weights folder, then load it.
@@ -107,10 +111,17 @@ def download_model(progress=gr.Progress()):
 
     try:
         path = weights.download("vit_b", progress=report)
+    except urllib.error.URLError as problem:   # before OSError, which it is too
+        return (f"❌ The download failed ({problem.reason}). "
+                "Check the internet connection and try again.",
+                gr.update(), gr.update(visible=True), gr.update(), gr.update())
+    except OSError as problem:
+        return (f"❌ The model could not be saved in {weights_dir()} "
+                f"({problem.strerror or problem}). Check that folder can be written to.",
+                gr.update(), gr.update(visible=True), gr.update(), gr.update())
     except Exception as problem:
-        return (f"❌ The download failed ({problem}). Check the internet connection "
-                "and try again.", gr.update(), gr.update(visible=True), gr.update(),
-                gr.update())
+        return (f"❌ The download failed ({problem}). Try again.",
+                gr.update(), gr.update(visible=True), gr.update(), gr.update())
 
     status, load_images = initialize_sam(str(path), progress=progress)
     return (status,
@@ -132,7 +143,35 @@ def current_save_dataset():
     return state.save_dataset
 
 
-def load_images_from_folder(folder, results_file="", progress=gr.Progress()):
+def restore_setup():
+    """
+    The Setup tab as the session left it, for a browser connecting to a running
+    app — after a refresh, say. The page itself is built once, at start-up, so
+    without this it shows the start-up state: no model, Load images disabled,
+    and the download button back even after a download.
+
+    Returns:
+        tuple: (checkpoint list, download button, Load model button, model status,
+        Load images button)
+    """
+    found = [str(p) for p in discover_checkpoints()]
+    loaded = state.sam_model is not None
+    current = str(state.sam_model.checkpoint) if loaded else (found[0] if found else None)
+    if current and current not in found:
+        found.append(current)
+    status = ""
+    if loaded:
+        status = (f"✅ SAM model loaded ({state.sam_model.model_type}, on "
+                  f"{state.sam_model.device.type})")
+    return (gr.update(choices=found, value=current,
+                      info=CHECKPOINTS_FOUND if found else CHECKPOINTS_MISSING),
+            gr.update(visible=not found),
+            gr.update(variant="primary" if found else "secondary"),
+            status,
+            gr.update(interactive=loaded))
+
+
+def load_images_from_folder(folder, progress=gr.Progress()):
     """
     Open every image in one folder, and the results file that belongs to it.
 
@@ -141,62 +180,71 @@ def load_images_from_folder(folder, results_file="", progress=gr.Progress()):
     file would then have been written — somewhere the operating system clears on
     its own schedule, and nowhere the analyst would look for it.
 
-    Results go to ``analysis_results.csv`` in the folder unless ``results_file``
-    names another file (or a folder to put it in). An existing file is carried
-    on with, so opening a folder again resumes it.
+    Results always go to ``analysis_results.csv`` in the folder, and an existing
+    one is carried on with, so opening a folder again resumes it. One folder,
+    one results file: a file shared between folders would mix up images that
+    happen to have the same names.
 
     Returns:
-        tuple: (status text, gallery items or None)
+        tuple: (status text, gallery update, tabs update)
     """
+    unchanged = (gr.update(), gr.update())
     try:
         folder = clean_path(folder)
         if not folder:
-            return "❌ Paste the path of a folder of images.", None
+            return ("❌ Paste the path of a folder of images.",) + unchanged
         if not os.path.isdir(folder):
-            return f"❌ No folder at {folder}", None
+            return (f"❌ No folder at {folder}",) + unchanged
 
         progress(0.3, desc="Finding images...")
         image_paths = find_images_in_folder(folder)
         if not image_paths:
-            return (f"❌ No images in {folder}. Looking for .tif, .tiff, .png, "
-                    ".jpg and .jpeg files directly inside it."), None
+            return ((f"❌ No images in {folder}. Looking for .tif, .tiff, .png, "
+                     ".jpg and .jpeg files directly inside it."),) + unchanged
 
-        csv_path = clean_path(results_file) or os.path.join(folder, RESULTS_FILENAME)
-        if os.path.isdir(csv_path):
-            csv_path = os.path.join(csv_path, RESULTS_FILENAME)
+        # Checked before anything changes: a folder that cannot be written to
+        # would otherwise fail on the first save, after the analyst's work.
+        csv_path = os.path.join(folder, RESULTS_FILENAME)
         try:
+            with tempfile.TemporaryFile(dir=folder):
+                pass
+            if os.path.exists(csv_path):
+                with open(csv_path, "a"):
+                    pass
             results_manager = ResultsManager(csv_file=csv_path)
         except OSError as e:
-            return (f"❌ Cannot write results to {csv_path} ({e.strerror or e}). "
-                    "Give a results file somewhere writable under "
-                    "'Save results somewhere else'."), None
+            return ((f"❌ Results cannot be saved in {folder} ({e.strerror or e}). "
+                     "Copy the images to a folder you can write to, and open that "
+                     "one."),) + unchanged
 
         state.image_paths = image_paths
         state.current_index = 0
+        # The image on screen belongs to the folder that was open before;
+        # saving it now would file it under this folder's first image.
+        state.reset_image_state()
+        state.scale_baseline = None
         state.processed_images = {}
         state.results_manager = results_manager
 
         # Ticks come from the results file, matched by name, so a frame saved
         # in an earlier session shows as done.
-        state.load_state()
         matched, unmatched = state.sync_processed_from_csv()
 
         progress(0.7, desc="Creating gallery...")
         gallery_data = create_image_gallery()
 
-        progress(1.0, desc="Complete!")
-
-        status_parts = [f"✅ {len(image_paths)} images from {folder}",
-                        f"results in {csv_path}"]
+        count = len(image_paths)
+        status_parts = [f"✅ {count} image{'' if count == 1 else 's'} in {folder}. "
+                        f"Results are saved to {RESULTS_FILENAME} there."]
         if matched > 0:
-            status_parts.append(f"{matched} already analysed")
+            status_parts.append(f"{matched} already analysed.")
         if unmatched > 0:
-            status_parts.append(f"⚠️ {unmatched} rows in the results file match "
-                                "no image in this folder")
+            status_parts.append(f"⚠️ {unmatched} row{'' if unmatched == 1 else 's'} in "
+                                "the results file match no image in this folder.")
 
-        return " | ".join(status_parts), gallery_data
+        return " ".join(status_parts), gallery_data, gr.Tabs(selected=1)
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return f"❌ Error: {str(e)}", None
+        return (f"❌ Error: {str(e)}",) + unchanged

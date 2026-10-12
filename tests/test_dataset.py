@@ -167,13 +167,23 @@ class TestTheApp:
         assert status.startswith("✅")
         assert not (folder / DIRNAME).exists()
 
+    def test_switched_off_a_resave_drops_the_now_stale_copy(self, app):
+        # The dataset must never disagree with the row the analyst just saved.
+        from sem_analysis_app.callbacks.results import save_current_results
+
+        state, folder = app
+        save_current_results()
+        state.save_dataset = False
+        save_current_results()
+        assert TrainingSet(folder / DIRNAME).rows() == []
+
     def test_deleting_a_result_deletes_its_training_data(self, app):
         from sem_analysis_app.callbacks.results import (delete_result_row,
                                                          save_current_results)
 
         state, folder = app
         save_current_results()
-        *_, message = delete_result_row("0: A_0001.tif")
+        *_, message, _gallery = delete_result_row("A_0001.tif")
         assert message.startswith("✅"), message
         assert TrainingSet(folder / DIRNAME).rows() == []
         assert not (folder / DIRNAME / "masks" / "A_0001_mask.png").exists()

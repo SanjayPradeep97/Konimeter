@@ -55,6 +55,11 @@ def remove_objects_smaller_than(mask, min_size):
     Passing ``max_size=min_size - 1`` restores the documented boundary and keeps
     it stable across versions.
 
+    Components are 8-connected, as everywhere else particles are labelled. The
+    library defaults to 4-connectivity, which saw a thin diagonal fibre as a
+    string of separate specks and deleted it, even though the labelling that
+    follows counts it as one particle well above the minimum.
+
     Args:
         mask (np.ndarray): Boolean mask.
         min_size (int): Smallest component area to keep, inclusive.
@@ -67,9 +72,11 @@ def remove_objects_smaller_than(mask, min_size):
         return mask
 
     try:
-        return morphology.remove_small_objects(mask, max_size=min_size - 1)
+        return morphology.remove_small_objects(mask, max_size=min_size - 1,
+                                               connectivity=2)
     except TypeError:  # scikit-image < 0.26 has no max_size
-        return morphology.remove_small_objects(mask, min_size=min_size)
+        return morphology.remove_small_objects(mask, min_size=min_size,
+                                               connectivity=2)
 
 
 def binary_dilation(mask, footprint):

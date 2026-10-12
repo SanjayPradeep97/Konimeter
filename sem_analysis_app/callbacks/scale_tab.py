@@ -171,6 +171,10 @@ def _adopt(calibration):
     """
     state.scale_calibration = calibration
     state.scale_info = calibration.to_dict()
+    # A scale set after a candidate was chosen has to reach its measurements;
+    # otherwise the results row says one scale and was computed with another.
+    if state.analyzer is not None:
+        state.analyzer.conversion = calibration.nm_per_px
     # Kept against this image, so returning to it does not repeat the work — and
     # in particular does not throw away a bar the analyst read by hand.
     state.remember_scale(calibration)
@@ -357,10 +361,19 @@ def prepare_scale_tab():
         return _try_automatic_bar(payload, tier1)
 
     _adopt(calibration)
+    name = os.path.basename(str(path)) if path else "image"
+    if not calibration.trustworthy:
+        # Only the TIFF's generic resolution tag, which is usually a print
+        # setting: offered, but left for the analyst to confirm.
+        return (payload,
+                f"⚠️ Tier 1 — {name} gives a pixel size only in its TIFF "
+                "resolution tag, which is usually a print setting. Check it "
+                "against the scale bar, then press Confirm scale, or measure the "
+                "bar (tier 2 or 3).",
+                _status_lines(), "", frame_summary())
     # Exact, and therefore the best possible yardstick for the readings that
     # follow it in this folder.
     state.accept_scale(calibration)
-    name = os.path.basename(str(path)) if path else "image"
     return (payload,
             f"✅ Tier 1 — pixel size read from {name}'s metadata. Nothing else to do.",
             _status_lines(), "", frame_summary())
@@ -472,6 +485,21 @@ def confirm_scale():
     return "✅ Scale confirmed", _status_lines()
 
 
+def current_frame_controls():
+    """
+    The frame and segmentation settings as the session has them, for a browser
+    connecting to a running app. The page shows start-up defaults otherwise,
+    while the session goes on using what the analyst set.
+
+    Returns:
+        tuple: (instrument, particle polarity, trim override on, trim percent,
+        smallest particle)
+    """
+    override = state.crop_override
+    return (state.modality_choice or "auto", state.particle_choice or "auto",
+            override is not None, override or 0, state.min_particle_size)
+
+
 def clear_scale():
     """
     Discard the calibration and start again.
@@ -481,6 +509,8 @@ def clear_scale():
     """
     state.scale_calibration = None
     state.scale_info = None
+    if state.analyzer is not None:
+        state.analyzer.conversion = None
     state.forget_scale()
     return "Scale cleared", _status_lines()
 

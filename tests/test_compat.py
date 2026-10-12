@@ -39,6 +39,21 @@ class TestRemoveObjectsSmallerThan:
         mask = component_of_area(31)
         assert _compat.remove_objects_smaller_than(mask, 31).sum() == 31
 
+    def test_a_diagonal_particle_counts_as_one(self):
+        # Particles are labelled 8-connected. Filtered 4-connected, a thin
+        # diagonal fibre was a string of single-pixel specks and vanished,
+        # although the labelling would have counted it as one particle.
+        mask = np.zeros((60, 60), dtype=bool)
+        for i in range(50):
+            mask[5 + i, 5 + i] = True
+        assert _compat.remove_objects_smaller_than(mask, 30).sum() == 50
+
+    def test_squares_meeting_at_a_corner_are_one_component(self):
+        mask = np.zeros((40, 40), dtype=bool)
+        mask[10:15, 10:15] = True
+        mask[15:20, 15:20] = True       # 25 + 25, touching diagonally
+        assert _compat.remove_objects_smaller_than(mask, 30).sum() == 50
+
     @pytest.mark.parametrize("min_size", [0, 1])
     def test_no_op_for_trivial_thresholds(self, min_size):
         mask = component_of_area(1)

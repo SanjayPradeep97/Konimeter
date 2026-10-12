@@ -219,8 +219,8 @@
     lx = clamp(lx, EDGE_PAD, c.width - LOUPE - EDGE_PAD);
     ly = clamp(ly, EDGE_PAD, c.height - LOUPE - EDGE_PAD);
 
-    // Source window, in the ORIGINAL image, so the zoom shows real pixels
-    // rather than an interpolation of the already-downscaled canvas.
+    // Source window, in the image as sent, so the zoom shows its pixels rather
+    // than an interpolation of the canvas, which may be scaled down further.
     const src = LOUPE / LOUPE_ZOOM;
     const sx = ix - src / 2, sy = iy - src / 2;
 
@@ -402,7 +402,10 @@
           y1: clamp(data.box.y1 * S.pxScale, 0, S.ih),
         } : defaultBox();
         fitView();
+        // Both channels, so Apply on this image never measures with the last
+        // image's clicks, which would no longer be drawn anywhere.
         commitBox();
+        commitPoints();
         draw();
       };
       img.src = data.img;

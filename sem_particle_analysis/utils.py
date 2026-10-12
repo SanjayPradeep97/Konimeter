@@ -14,23 +14,53 @@ except ImportError:
 
 def load_image(file_path):
     """
-    Load an image from file and convert to RGB.
+    Load an image as 8-bit RGB.
+
+    The file is read through numpy rather than by handing cv2 the path, which on
+    Windows cannot open a path containing non-ASCII characters. Images deeper
+    than 8 bits — 12- or 16-bit detector data, float TIFFs — are stretched to
+    0-255 over their own range: read the default way, a 12-bit image in a 16-bit
+    file came out nearly black, and a float TIFF did not load at all.
 
     Args:
         file_path (str): Path to image file
 
     Returns:
-        np.ndarray: RGB image array
+        np.ndarray: RGB image array, uint8
 
     Raises:
         FileNotFoundError: If image file doesn't exist
         ValueError: If image cannot be loaded
     """
-    bgr = cv2.imread(file_path)
-    if bgr is None:
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"No such image: {file_path}")
+    image = cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+    if image is None and TIFFFILE_AVAILABLE and str(file_path).lower().endswith((".tif", ".tiff")):
+        try:
+            image = tifffile.imread(file_path)
+            if image.ndim == 3 and image.shape[2] in (3, 4):
+                image = image[..., [2, 1, 0] + ([3] if image.shape[2] == 4 else [])]
+        except Exception:
+            image = None
+    if image is None:
         raise ValueError(f"Could not load image: {file_path}")
 
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    if image.ndim == 3 and image.shape[2] == 1:
+        image = image[..., 0]
+    if image.ndim == 3 and image.shape[2] == 4:
+        image = image[..., :3]          # drop alpha; still BGR here
+    if image.ndim not in (2, 3):
+        raise ValueError(f"Unsupported image layout {image.shape}: {file_path}")
+
+    if image.dtype != np.uint8:
+        values = np.nan_to_num(image.astype(np.float64))
+        low, high = float(values.min()), float(values.max())
+        scale = 255.0 / (high - low) if high > low else 0.0
+        image = np.clip((values - low) * scale, 0, 255).astype(np.uint8)
+
+    if image.ndim == 2:
+        return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+    return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
 
 def extract_tiff_metadata(file_path):

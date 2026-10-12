@@ -55,7 +55,7 @@ The tabs, in the order they are used:
 
 | Tab | What happens there |
 | --- | --- |
-| ⚙️ Setup | Load a SAM checkpoint, then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it. A results file elsewhere can be named instead |
+| ⚙️ Setup | Load the SAM model (the first time, download it with the button there), then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it |
 | 🖼️ Gallery | Pick an image. Ticked images already have saved results |
 | 📏 Scale & Frame | Establish the scale (below), and check what the app decided about the instrument and the analysable area |
 | 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include and exclude clicks. Every click and every applied change can be undone |
@@ -91,13 +91,13 @@ this one number. Three tiers, tried in order of trustworthiness:
 
 | Tier | Method | When it applies |
 | --- | --- | --- |
-| 1 | Pixel size read from the file's own metadata | Automatic on load. Exact, nothing to check |
+| 1 | Pixel size read from the file's own metadata | Automatic on load. Exact, nothing to check. A pixel size found only in a TIFF's generic resolution tag, usually a print setting, waits to be confirmed |
 | 2 | Read the printed scale bar inside a box you draw | Runs automatically first; drag the box if it got it wrong |
-| 3 | Click both ends of the bar and type its length | When the bar is unreadable. A magnifier follows the cursor so you land on the exact pixel |
+| 3 | Click the outer edge of each end of the bar and type its length | When the bar is unreadable. A magnifier follows the cursor so you land exactly on the edge |
 
 Tier 2's box is manipulated directly on the image: drag anywhere to draw one,
 drag a corner to resize, drag the middle to move. Tier 3 shows a 7x loupe with a
-crosshair marking precisely which pixel a click will land on.
+crosshair marking precisely where a click will land.
 
 A tier-2 reading is marked unconfirmed until you press **Confirm scale**; tier 1
 and tier 3 are trusted outright, since neither involves a machine reading a

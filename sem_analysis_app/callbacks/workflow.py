@@ -19,8 +19,18 @@ from .results import save_current_results
 from .scale_tab import frame_header, prepare_scale_tab
 
 
+# How many outputs open_current_image fills (ui.OPEN_OUTPUTS).
+OPEN_COUNT = 11
+
+
 def _load_index(index):
-    """Load image at ``index`` into state. Returns (image, info) or (None, error)."""
+    """
+    Load image at ``index`` into state.
+
+    Returns:
+        tuple: (image, info), or (None, message) — a message starting "❌" when
+        the image exists but could not be read, rather than when the folder ran out.
+    """
     from sem_particle_analysis.utils import load_image
 
     if not state.image_paths:
@@ -33,7 +43,9 @@ def _load_index(index):
     try:
         state.current_image = load_image(state.image_paths[index])
     except Exception as exc:
-        return None, f"❌ Error loading image: {exc}"
+        name = os.path.basename(state.image_paths[index])
+        return None, (f"❌ {name} could not be opened ({exc}). Press Skip to go on "
+                      "to the next image, or pick one in the Gallery.")
 
     filename = os.path.basename(state.image_paths[index])
     return state.current_image, f"Image {index + 1} / {len(state.image_paths)}: {filename}"
@@ -72,13 +84,16 @@ def open_current_image(progress=gr.Progress()):
 
     Returns:
         tuple: (canvas_payload, tier1_status, scale_summary, point_readout,
-                frame_status, header, mask_viz, segment_status, mask_choice)
+                frame_status, header, mask_viz, segment_status, mask_choice,
+                tool, point_type)
     """
     payload, tier1, summary, hint, frame = prepare_scale_tab()
     mask_viz, segment_status, choice = auto_process_current_image(progress)
-    # The header is built last, so it can report the particle count.
+    # The header is built last, so it can report the particle count. The two
+    # tool controls are set to what reset_image_state left in state, so the
+    # screen cannot show Merge while clicks queue deletions.
     return (payload, tier1, summary, hint, frame, frame_header(),
-            mask_viz, segment_status, choice)
+            mask_viz, segment_status, choice, state.click_mode, state.point_type)
 
 
 def save_and_next(progress=gr.Progress()):
@@ -97,16 +112,16 @@ def save_and_next(progress=gr.Progress()):
                 scale_summary, point_readout, frame_status, header, mask_viz,
                 segment_status, mask_choice)
     """
-    blank = (gr.update(),) * 11
     save_status, gallery_data = save_current_results()
-    if gallery_data is None:
+    if not save_status.startswith("✅"):
         # Nothing was saved — stay put rather than advancing past unsaved work.
-        return (save_status,) + blank
+        return (save_status,) + (gr.update(),) * (OPEN_COUNT + 2)
 
     image, info = _load_index(state.current_index + 1)
     if image is None:
-        return ((f"{save_status} — {info}. All done.", gallery_data, info)
-                + (gr.update(),) * 9)
+        ending = info if info.startswith("❌") else "That was the last image. All done."
+        return ((f"{save_status}. {ending}", gallery_data, info)
+                + (gr.update(),) * OPEN_COUNT)
 
     return (save_status, gallery_data, info) + open_current_image(progress)
 
@@ -122,5 +137,5 @@ def skip_to_next(progress=gr.Progress()):
     """
     image, info = _load_index(state.current_index + 1)
     if image is None:
-        return (info,) + (gr.update(),) * 9
+        return (info,) + (gr.update(),) * OPEN_COUNT
     return (info,) + open_current_image(progress)

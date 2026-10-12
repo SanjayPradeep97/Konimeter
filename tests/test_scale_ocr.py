@@ -24,7 +24,9 @@ class TestReadsASyntheticBar:
         result = scale_detector.detect_scale_bar(image, **databar_region(truth))
         assert result["conversion"] == pytest.approx(truth["nm_per_px"], rel=0.05)
         assert result["scale_nm"] == pytest.approx(500.0)
-        assert result["pixel_length"] == pytest.approx(200, abs=10)
+        # Exactly: the bar covers 200 pixels, and a reading one short overstates
+        # nm/px by 1/200 for every measurement made with it.
+        assert result["pixel_length"] == 200
 
     def test_reads_a_micron_label(self, scale_detector):
         image, truth = make_micrograph(bar_length_px=250, scale_text="1 um",

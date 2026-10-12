@@ -11,50 +11,52 @@ from ..state import state
 # Gallery tiles are ~200px on screen; anything larger is wasted bytes.
 THUMBNAIL_PX = (320, 320)
 
-def create_image_gallery():
-    """Create gallery view with processing status."""
-    if not state.image_paths:
-        return []
+# Thumbnails by path, kept while the file is unchanged. The gallery is rebuilt
+# after every save, and decoding every frame in a folder of hundreds each time
+# made saving slower the further through a folder the analyst got.
+_thumbnails = {}
 
+
+def _thumbnail(path):
+    """A small copy of one image, or a grey tile saying it could not be read."""
+    try:
+        stamp = os.stat(path).st_mtime_ns
+    except OSError:
+        stamp = None
+    cached = _thumbnails.get(path)
+    if cached is not None and cached[0] == stamp and stamp is not None:
+        return cached[1], True
+    try:
+        # load_image, so a 16-bit frame looks as it will when opened.
+        image = Image.fromarray(load_image(path))
+        image.thumbnail(THUMBNAIL_PX, Image.LANCZOS)
+        _thumbnails[path] = (stamp, image)
+        return image, True
+    except Exception as problem:
+        print(f"Could not read {path}: {problem}")
+        return Image.new("RGB", (THUMBNAIL_PX[0], THUMBNAIL_PX[0] * 3 // 4), (90, 90, 90)), False
+
+
+def create_image_gallery():
+    """
+    One tile per image, in the order of ``state.image_paths``, ticked once saved.
+
+    An image that cannot be read still gets a tile, a grey one, rather than being
+    skipped: tiles are opened by position, so skipping one made every later tile
+    open the image after it.
+    """
     gallery_items = []
     for idx, img_path in enumerate(state.image_paths):
-        # Create thumbnail
-        try:
-            # Verify file exists and is readable
-            if not os.path.exists(img_path):
-                print(f"File not found: {img_path}")
-                continue
-
-            # Load image as PIL Image for Gradio Gallery
-            # This ensures compatibility across Windows and macOS
-            img = Image.open(img_path)
-
-            # Convert to RGB if needed (handles RGBA, grayscale, etc.)
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-
-            # Actually make a thumbnail. Handing Gradio the full frame means
-            # serialising four megapixels per tile — a folder of 2048px
-            # micrographs then takes so long the gallery looks hung.
-            img.thumbnail(THUMBNAIL_PX, Image.LANCZOS)
-
-            filename = os.path.basename(img_path)
-
-            # Add status indicator to filename
-            if state.is_processed(idx):
-                particles = state.processed_images[idx].get("num_particles", "?")
-                label = f"✅ {filename} ({particles} particles)"
-            else:
-                label = f"⚪ {filename}"
-
-            # Gradio Gallery expects (image, caption) tuples where image is PIL Image or path
-            gallery_items.append((img, label))
-        except Exception as e:
-            print(f"Error loading {img_path}: {e}")
-            import traceback
-            traceback.print_exc()
-            continue
-
+        image, readable = _thumbnail(img_path)
+        filename = os.path.basename(img_path)
+        if not readable:
+            label = f"⚠️ {filename} (cannot be read)"
+        elif state.is_processed(idx):
+            particles = state.processed_images[idx].get("num_particles", "?")
+            label = f"✅ {filename} ({particles} particle{'' if particles == 1 else 's'})"
+        else:
+            label = f"⚪ {filename}"
+        gallery_items.append((image, label))
     return gallery_items
 
 
@@ -98,9 +100,10 @@ def restore_session():
         return [], ""
 
     done = sum(1 for i in range(len(state.image_paths)) if state.is_processed(i))
-    status = f"✅ {len(state.image_paths)} images in this session"
+    count = len(state.image_paths)
+    status = f"✅ {count} image{'' if count == 1 else 's'} open"
     if done:
         status += f", {done} already analysed"
     if state.results_manager is not None:
-        status += f" | results in {state.results_manager.csv_file}"
+        status += f". Results are saved to {state.results_manager.csv_file}"
     return create_image_gallery(), status
