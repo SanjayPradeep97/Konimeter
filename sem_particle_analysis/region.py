@@ -126,10 +126,13 @@ def analysable_region(image, exclude_boxes=(), blocked=None, margin=BLOCKED_MARG
         if box is None or len(box) != 4:
             continue
         x0, y0, box_w, box_h = (int(round(v)) for v in box)
+        # The far edge comes from the box itself, before the near edge is
+        # clamped to the frame. Computed from the clamped edge, a box near the
+        # left or top lost up to a margin's worth of specimen on its far side.
+        x1 = min(width, x0 + box_w + margin)
+        y1 = min(height, y0 + box_h + margin)
         x0 = max(0, x0 - margin)
         y0 = max(0, y0 - margin)
-        x1 = min(width, x0 + box_w + 2 * margin)
-        y1 = min(height, y0 + box_h + 2 * margin)
         if x1 > x0 and y1 > y0:
             region[y0:y1, x0:x1] = False
             boxes_applied += 1

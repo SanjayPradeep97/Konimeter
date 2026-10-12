@@ -31,6 +31,9 @@ def save_training_frame(filename, measurements, scale_method):
         str: A note for the status line; empty when saving training data is off.
     """
     if not getattr(state, "save_dataset", True):
+        # An earlier copy of this frame would now disagree with its row.
+        TrainingSet.beside(state.results_manager.csv_file).remove(
+            os.path.splitext(filename)[0])
         return ""
     image = state.cropped_image
     if image is None or state.analyzer is None:
@@ -82,13 +85,17 @@ def save_current_results(file_name=None):
     catch it.
     """
     try:
+        # gr.update() rather than None on every failure: None would empty the
+        # gallery, which looks like the folder's work was lost.
         if state.analyzer is None:
-            return "❌ No analysis to save", None
+            return "❌ Nothing to save yet: choose a candidate first.", gr.update()
 
         if state.results_manager is None:
-            return "❌ Results manager not initialized", None
+            return "❌ No folder is open. Open one on the Setup tab.", gr.update()
 
-        # Get measurements
+        # Measured with the scale in force now, whatever it was when the
+        # candidate was chosen, so the row's numbers and its scale_method agree.
+        state.analyzer.conversion = (state.scale_info or {}).get("conversion")
         measurements = state.analyzer.get_measurements(in_nm=True)
 
         # How the scale was arrived at goes in with the numbers it produced. An
@@ -107,7 +114,6 @@ def save_current_results(file_name=None):
 
         # Mark as processed
         state.mark_processed(state.current_index, measurements['num_particles'])
-        state.save_state()
 
         note = save_training_frame(filename, measurements, scale_method)
 
@@ -120,107 +126,106 @@ def save_current_results(file_name=None):
         )
 
     except Exception as e:
-        return f"❌ Error: {str(e)}", None
+        return f"❌ Error: {str(e)}", gr.update()
 
 
 def get_session_summary():
-    """Get summary of all processed images with aggregate particle statistics."""
+    """
+    The whole folder's results: progress, particle statistics, and the list of
+    saved frames to delete from.
+
+    Returns:
+        tuple: (table, progress markdown, statistics markdown, delete-list update)
+    """
+    no_choices = gr.update(choices=[], value=None)
     try:
         if state.results_manager is None:
-            return None, "No results available", "No particle statistics available", gr.update(choices=[], value=None)
+            return gr.update(), "No folder is open.", "No particle statistics yet.", no_choices
 
         results_df = state.results_manager.get_results()
 
         if len(results_df) == 0:
-            return None, "No images processed yet", "No particle statistics available", gr.update(choices=[], value=None)
+            empty = results_df[['file_name', 'num_particles']].set_axis(
+                ['Filename', 'Particle Count'], axis=1)
+            return (empty, "Nothing saved in this folder yet.",
+                    "No particle statistics yet.", no_choices)
 
         summary = state.results_manager.get_summary()
-
-        # Progress summary (left column)
         progress_text = f"""
-### Session Progress
+### Progress
 
-- **Images Processed:** {summary['total_images']} / {len(state.image_paths)}
-- **Total Particles:** {summary['total_particles']}
-- **Average Particles/Image:** {summary['avg_particles_per_image']:.1f}
-- **Min Particles/Image:** {summary['min_particles']}
-- **Max Particles/Image:** {summary['max_particles']}
+- **Images saved:** {summary['total_images']} of {len(state.image_paths)}
+- **Particles:** {summary['total_particles']}
+- **Particles per image:** {summary['avg_particles_per_image']:.1f} on average, {summary['min_particles']} to {summary['max_particles']}
         """
 
-        # Aggregate particle statistics (right column)
-        # Collect all particle diameters from all images
+        # Only frames with a scale have sizes in nm; the rest were measured in
+        # pixels and cannot be pooled with them. Say how many are left out
+        # rather than leaving them out silently.
         all_diameters = []
-        for idx, row in results_df.iterrows():
+        for _, row in results_df.iterrows():
             all_diameters.extend(parse_measurement_list(row['equiv_diameters_nm']))
+        total = int(summary['total_particles'])
 
-        if len(all_diameters) > 0:
-            mean_diam = np.mean(all_diameters) / 1000  # Convert to μm
-            median_diam = np.median(all_diameters) / 1000
-            std_diam = np.std(all_diameters) / 1000
-            min_diam = np.min(all_diameters) / 1000
-            max_diam = np.max(all_diameters) / 1000
-
+        if all_diameters:
+            um = np.asarray(all_diameters) / 1000
             particle_stats_text = f"""
-### Aggregate Particle Statistics
+### Particle sizes (equivalent diameter)
 
-- **Mean Diameter:** {mean_diam:.3f} μm
-- **Median Diameter:** {median_diam:.3f} μm
-- **Std Deviation:** {std_diam:.3f} μm
-- **Min Diameter:** {min_diam:.3f} μm
-- **Max Diameter:** {max_diam:.3f} μm
+- **Mean:** {um.mean():.3f} μm
+- **Median:** {np.median(um):.3f} μm
+- **Standard deviation:** {um.std():.3f} μm
+- **Range:** {um.min():.3f} to {um.max():.3f} μm
             """
+            if len(all_diameters) < total:
+                particle_stats_text += (
+                    f"\nFrom {len(all_diameters)} of {total} particles: the rest are "
+                    "in frames saved without a scale, measured in pixels.")
         else:
-            particle_stats_text = "### Aggregate Particle Statistics\n\nNo particle data available"
+            particle_stats_text = ("### Particle sizes\n\nNo frame has been saved with a "
+                                   "scale yet, so there are no sizes in nm.")
 
         display_df = results_df[['file_name', 'num_particles']].copy()
         display_df.columns = ['Filename', 'Particle Count']
 
-        # Create dropdown choices for delete functionality
-        # Format: "index: filename" so user can see both
-        dropdown_choices = [f"{i}: {row['file_name']}" for i, row in results_df.iterrows()]
-
-        return display_df, progress_text, particle_stats_text, gr.update(choices=dropdown_choices, value=None)
+        # By name: positions change whenever the file is rewritten.
+        names = [str(name) for name in results_df['file_name']]
+        return (display_df, progress_text, particle_stats_text,
+                gr.update(choices=names, value=None))
 
     except Exception as e:
-        return None, f"❌ Error: {str(e)}", f"❌ Error: {str(e)}", gr.update(choices=[], value=None)
+        return gr.update(), f"❌ Error: {str(e)}", "", gr.update()
 
 
 def delete_result_row(selected_item):
-    """Delete a specific row from the results table."""
+    """
+    Delete one image's results, and its training data, by file name.
+
+    Returns:
+        tuple: (table, progress, statistics, delete-list update, status, gallery)
+    """
+    unchanged = (gr.update(),) * 4
     try:
         if state.results_manager is None:
-            return None, None, None, gr.update(), "❌ No results available"
+            return unchanged + ("❌ No folder is open.", gr.update())
+        if not selected_item:
+            return unchanged + ("❌ Choose an image to delete first.", gr.update())
 
-        if selected_item is None:
-            return None, None, None, gr.update(), "❌ Please select a row to delete"
+        name = str(selected_item)
+        if not state.results_manager.delete_frame(name):
+            return unchanged + (f"❌ {name} is no longer in the results file. "
+                                "Press Refresh.", gr.update())
+        # The dataset holds the frames the results file does.
+        TrainingSet.beside(state.results_manager.csv_file).remove(os.path.splitext(name)[0])
 
-        results_df = state.results_manager.get_results()
+        # Ticks are rebuilt from the file, so the deleted frame loses its tick.
+        state.processed_images = {}
+        state.sync_processed_from_csv()
 
-        if len(results_df) == 0:
-            return None, None, None, gr.update(), "❌ No results to delete"
-
-        # Parse the selection format "index: filename"
-        idx_str = selected_item.split(":")[0].strip()
-        idx = int(idx_str)
-
-        # Get filename for confirmation message
-        filename = results_df.loc[idx, 'file_name']
-
-        # Delete the row, and the frame's training data with it, so the dataset
-        # holds the frames the results file does.
-        state.results_manager.delete_result(idx)
-        TrainingSet.beside(state.results_manager.csv_file).remove(
-            os.path.splitext(str(filename))[0])
-
-        # Get updated summary (includes new dropdown choices)
-        display_df, progress_text, particle_stats_text, dropdown_update = get_session_summary()
-
-        return display_df, progress_text, particle_stats_text, dropdown_update, f"✅ Deleted: {filename}"
-
-    except IndexError as e:
-        return None, None, None, gr.update(), f"❌ Index error: {str(e)}"
+        return (get_session_summary() + (f"✅ Deleted the results for {name}",
+                                         create_image_gallery()))
     except Exception as e:
-        return None, None, None, gr.update(), f"❌ Error: {str(e)}"
+        return unchanged + (f"❌ Error: {str(e)}", gr.update())
 
 
 def export_results():
@@ -248,8 +253,9 @@ def export_results():
         copy = Path(tempfile.mkdtemp(prefix="export-")) / f"{source.stem}_{stamp}.csv"
         table.to_csv(copy, index=False)
 
-        return str(copy), (f"✅ {len(table)} rows ready to download. The working "
-                           f"copy stays at {source}")
+        rows = f"{len(table)} row{'' if len(table) == 1 else 's'}"
+        return str(copy), (f"✅ {rows} ready to download. The working copy stays "
+                           f"at {source}")
     except Exception as problem:
         return None, f"❌ Export failed: {problem}"
 
@@ -258,13 +264,13 @@ def check_and_remove_duplicates():
     """Check for duplicate entries and remove them."""
     try:
         if state.results_manager is None:
-            return None, "❌ No results manager initialized"
+            return gr.update(), "❌ No folder is open."
 
         # Find duplicates
         duplicates = state.results_manager.find_duplicates()
 
         if len(duplicates) == 0:
-            return None, "✅ No duplicate entries found"
+            return gr.update(), "✅ No duplicate entries found"
 
         # Delete duplicates (keep last occurrence)
         deleted_count = state.results_manager.delete_duplicates(keep='last')
@@ -277,7 +283,8 @@ def check_and_remove_duplicates():
             display_df = results_df[['file_name', 'num_particles']].copy()
             display_df.columns = ['Filename', 'Particle Count']
 
-        return display_df, f"✅ Removed {deleted_count} duplicate entries (kept last occurrence)"
+        entries = f"{deleted_count} duplicate entr{'y' if deleted_count == 1 else 'ies'}"
+        return display_df, f"✅ Removed {entries}, keeping the latest of each"
 
     except Exception as e:
-        return None, f"❌ Error: {str(e)}"
+        return gr.update(), f"❌ Error: {str(e)}"

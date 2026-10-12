@@ -39,7 +39,8 @@ class TestWhereTheMeasurementWasTaken:
         # so they are meaningless without the box's own origin — using them raw
         # would draw the span in the top-left corner of the frame.
         cal = box_ocr_calibration(box=(30, 900, 300, 1000), line=(3, 131, 60))
-        assert sc.measured_span(cal) == ((33.0, 960.0), (161.0, 960.0))
+        # Columns 3..131 are the bar's own pixels: 129 px, edge to edge.
+        assert sc.measured_span(cal) == ((33.0, 960.0), (162.0, 960.0))
 
     def test_an_automatic_reading_is_placed_by_its_search_region(self):
         # The automatic sweep records where it looked as (x, y, w, h) rather
@@ -47,7 +48,8 @@ class TestWhereTheMeasurementWasTaken:
         cal = box_ocr_calibration(box=None, line=(3, 131, 60),
                                   extra={"region": (30, 900, 270, 100),
                                          "line_coords": (3, 131, 60)})
-        assert sc.measured_span(cal) == ((33.0, 960.0), (161.0, 960.0))
+        # Columns 3..131 are the bar's own pixels: 129 px, edge to edge.
+        assert sc.measured_span(cal) == ((33.0, 960.0), (162.0, 960.0))
 
     def test_metadata_measured_no_bar_so_there_is_no_span(self):
         cal = sc.ScaleCalibration(nm_per_px=2.5, method="metadata")
@@ -362,3 +364,59 @@ class TestTheResultsFileSaysHowTheScaleWasSet:
         state.scale_calibration = None
         save_current_results()
         assert self.saved_method(csv_path) == "none"
+
+
+class TestAScaleSetAfterTheCandidateIsTheOneMeasured:
+    """
+    Measurements were fixed when the candidate was chosen, so a scale read or
+    cleared afterwards changed what the row said about its scale but not the
+    numbers in it.
+    """
+
+    @pytest.fixture
+    def analysed(self, app_state, tmp_path):
+        from sem_particle_analysis import ParticleAnalyzer, ResultsManager
+        from synthetic import make_disk_mask
+
+        mask, _ = make_disk_mask(shape=(200, 200), centers_radii=((60, 60, 20),))
+        analyzer = ParticleAnalyzer(conversion_factor=2.5, min_size=30)
+        analyzer.analyze_mask(mask, remove_border=False)
+        app_state.analyzer = analyzer
+        app_state.current_image = np.zeros((200, 200, 3), np.uint8)
+        app_state.image_paths = [str(tmp_path / "a.tif")]
+        app_state.current_index = 0
+        app_state.save_dataset = False
+        app_state.results_manager = ResultsManager(csv_file=str(tmp_path / "results.csv"))
+        yield app_state, tmp_path / "results.csv"
+        app_state.analyzer = None
+        app_state.results_manager = None
+
+    def saved(self, csv_path):
+        import pandas as pd
+        return pd.read_csv(csv_path).iloc[-1]
+
+    def test_a_later_reading_rescales_the_saved_numbers(self, analysed):
+        from sem_analysis_app.callbacks import scale_tab
+        from sem_analysis_app.callbacks.results import save_current_results
+
+        state, csv_path = analysed
+        scale_tab._adopt(sc.ScaleCalibration(nm_per_px=5.0, method="two_points",
+                                             confirmed=True))
+        save_current_results()
+        row = self.saved(csv_path)
+        assert row["nm_per_px"] == pytest.approx(5.0)
+        assert row["scale_method"] == "two_points"
+        area_px = float(row["particle_areas_px"].strip("[]"))
+        area_nm2 = float(row["particle_areas_nm2"].strip("[]"))
+        assert area_nm2 == pytest.approx(area_px * 25.0)
+
+    def test_clearing_the_scale_saves_pixels(self, analysed):
+        from sem_analysis_app.callbacks import scale_tab
+        from sem_analysis_app.callbacks.results import save_current_results
+
+        state, csv_path = analysed
+        scale_tab.clear_scale()
+        save_current_results()
+        row = self.saved(csv_path)
+        assert row["scale_method"] == "none"
+        assert np.isnan(row["nm_per_px"])

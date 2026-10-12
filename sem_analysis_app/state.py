@@ -6,9 +6,10 @@ original single-file design: the app is intended for one analyst working
 locally, and two browser tabs pointed at the same server share this object.
 """
 
-import json
 import os
-from pathlib import Path
+
+import numpy as np
+
 
 class AppState:
     """Enhanced application state with image processing tracking."""
@@ -174,13 +175,17 @@ class AppState:
         """
         Roll back to the mask as it was before the last applied edit.
 
+        Relabelled only, not cleaned again: the snapshot is the mask exactly as
+        it was measured, and cleaning it a second time used to bring Undo back
+        to slightly different areas from the ones it was undoing to.
+
         Returns:
             bool: True if a snapshot was restored, False if there was none.
         """
         if self.analyzer is None or not self.mask_history:
             return False
         self.analyzer.mask = self.mask_history.pop()
-        self.analyzer._relabel_and_filter()
+        self.analyzer._relabel()
         return True
 
     def accept_scale(self, calibration):
@@ -220,16 +225,34 @@ class AppState:
 
     # --- selections that have to survive a relabel ---------------------------
 
-    def anchor_selection(self, label, point):
+    def anchor_selection(self, label, point, labeled_mask=None):
         """
         Remember a pixel inside a particle that has been selected.
 
+        A click may land a few pixels outside the particle it selects (see
+        ParticleAnalyzer.CLICK_TOLERANCE_PX), so the clicked pixel is not
+        necessarily inside it. Anchored there, the selection resolved to
+        background at Apply and silently vanished: a near-miss Remove did
+        nothing and a near-miss Merge said it had too few particles. Given the
+        labelled mask, the anchor moves to the particle's pixel nearest the click.
+
         Args:
             label (int): The particle's label at the moment it was clicked.
-            point (tuple): (x, y) in image coordinates, inside the particle.
+            point (tuple): (x, y) in image coordinates, where it was clicked.
+            labeled_mask (np.ndarray, optional): The labelling ``label`` is from.
         """
-        if label is not None:
-            self.pending_anchors[int(label)] = (int(point[0]), int(point[1]))
+        if label is None:
+            return
+        x, y = int(point[0]), int(point[1])
+        if labeled_mask is not None:
+            height, width = labeled_mask.shape
+            inside = 0 <= y < height and 0 <= x < width and labeled_mask[y, x] == label
+            if not inside:
+                rows, cols = np.nonzero(labeled_mask == label)
+                if len(rows):
+                    nearest = int(np.argmin(np.hypot(rows - y, cols - x)))
+                    x, y = int(cols[nearest]), int(rows[nearest])
+        self.pending_anchors[int(label)] = (x, y)
 
     def resolve_label(self, label, labeled_mask):
         """
@@ -284,6 +307,11 @@ class AppState:
         self.pending_merge = merges
         self.point_refine_particle = refine[0] if refine else None
         self.pending_anchors = anchors
+        # The per-click history still holds the old labels, and undoing into it
+        # outlined and edited whichever particles had inherited them. Dropped,
+        # as Apply drops it; the edit that renumbered the mask is itself undone
+        # from its mask snapshot.
+        self.undo_history = []
 
     def mark_processed(self, index, num_particles):
         """Mark an image as processed."""
@@ -295,27 +323,6 @@ class AppState:
     def is_processed(self, index):
         """Check if an image has been processed."""
         return index in self.processed_images
-
-    def _state_file(self):
-        """Where processing state is kept: beside the results file, so that
-        everything the app writes is in one place."""
-        if self.results_manager is not None and self.results_manager.csv_file:
-            return Path(self.results_manager.csv_file).parent / ".analysis_state.json"
-        return Path(self.image_paths[0]).parent / ".analysis_state.json"
-
-    def save_state(self):
-        """Save processing state to file."""
-        if not self.image_paths:
-            return
-
-        state_file = self._state_file()
-        state_data = {
-            "processed_images": {
-                str(k): v for k, v in self.processed_images.items()
-            }
-        }
-        with open(state_file, 'w') as f:
-            json.dump(state_data, f, indent=2)
 
     def save_pending_state(self):
         """Save current pending changes state to undo history (for undoing individual clicks)."""
@@ -334,36 +341,24 @@ class AppState:
             'point_refine_logits': self.point_refine_logits.copy() if self.point_refine_logits is not None else None
         })
 
-    def load_state(self):
-        """Load processing state from file and validate against results CSV."""
-        if not self.image_paths:
-            return
+    def clear_pending_edits(self):
+        """
+        Forget every queued click, and the per-click undo history with them.
 
-        state_file = self._state_file()
-        if state_file.exists():
-            with open(state_file, 'r') as f:
-                state_data = json.load(f)
-                loaded_processed_images = {
-                    int(k): v for k, v in state_data.get("processed_images", {}).items()
-                }
-
-                # Validate against results CSV if results manager exists
-                if self.results_manager is not None:
-                    results_df = self.results_manager.get_results()
-                    saved_filenames = set(results_df['file_name'].tolist())
-
-                    # Only keep processed status if file actually exists in results CSV
-                    validated_processed_images = {}
-                    for idx, data in loaded_processed_images.items():
-                        if idx < len(self.image_paths):
-                            filename = os.path.basename(self.image_paths[idx])
-                            if filename in saved_filenames:
-                                validated_processed_images[idx] = data
-
-                    self.processed_images = validated_processed_images
-                else:
-                    # No results manager yet, clear processed images
-                    self.processed_images = {}
+        Applied edits are left alone: the mask and mask_history are untouched.
+        """
+        self.pending_deletes = []
+        self.pending_anchors = {}
+        self.pending_add_points = []
+        self.pending_add_masks = []
+        self.pending_merge = []
+        self.point_refine_particle = None
+        self.point_refine_base_mask = None
+        self.point_refine_points = []
+        self.point_refine_labels = []
+        self.point_refine_preview_mask = None
+        self.point_refine_logits = None
+        self.undo_history = []
 
     def sync_processed_from_csv(self):
         """Cross-reference loaded images with results CSV to set checkmarks.

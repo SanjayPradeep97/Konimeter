@@ -100,7 +100,7 @@ OpenMP runtime and otherwise refuse to share a process.
 
 | Tab | What happens there |
 | --- | --- |
-| ⚙️ Setup | Load the SAM model (the first time, download it with the button there), then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it. A results file elsewhere can be named instead |
+| ⚙️ Setup | Load the SAM model (the first time, download it with the button there), then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it |
 | 🖼️ Gallery | Pick an image. Ticked images already have saved results |
 | 📏 Scale & Frame | Establish the scale, and check what the app decided about the image (see below) |
 | 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include/exclude clicks. Every click and every applied change can be undone |
@@ -117,9 +117,9 @@ tab. Three methods, tried in order of trustworthiness:
 
 | | Method | When |
 | --- | --- | --- |
-| 1 | Pixel size read from the file's own metadata | Automatic on load. Exact — nothing to check |
+| 1 | Pixel size read from the file's own metadata | Automatic on load. Exact — nothing to check. The one exception: a pixel size found only in a TIFF's generic resolution tag, usually a print setting, waits for you to confirm it |
 | 2 | Read the printed scale bar inside a box | Runs automatically when there is no metadata. Drag to draw the box, a corner to resize it, the middle to move it |
-| 3 | Click both ends of the bar and type its length | When the bar cannot be read. A 7x magnifier follows the cursor so you land on the exact pixel |
+| 3 | Click the outer edge of each end of the bar and type its length | When the bar cannot be read. A 7x magnifier follows the cursor so you land exactly on the edge |
 
 A reading from the printed bar is marked unconfirmed until you press **Confirm
 scale**, and the measured span is drawn on the bar so you can see what was read.
@@ -162,7 +162,7 @@ gone and scale has to come from the printed bar or from a hand measurement.
 | `file_name` | the image |
 | `num_particles` | particle count |
 | `nm_per_px` | the scale used |
-| `scale_method` | how that scale was obtained, e.g. `metadata`, `box_ocr`, `two_points`; `+unconfirmed` if nobody confirmed it |
+| `scale_method` | how that scale was obtained: `metadata`, `tiff_resolution`, `box_ocr`, `two_points` or `none`; `+unconfirmed` if nobody confirmed it |
 | `particle_areas_px`, `particle_areas_nm2` | each particle's area |
 | `equiv_diameters_px`, `equiv_diameters_nm` | each particle's equivalent circular diameter |
 
@@ -201,7 +201,7 @@ the Setup tab.
 | `OMP: Error #15 ... already initialized` on Windows | Start the app with `run_app.bat`, or `set KMP_DUPLICATE_LIB_OK=TRUE` first |
 | The app will not start because the port is in use | Another copy is running; close it, or start with `--port 7861` |
 | "No images in …" | The images must be directly inside the folder, with one of the extensions above |
-| "Cannot write results to …" | The folder is read-only (a network share, say). Open **Save results somewhere else** on the Setup tab and give a writable folder |
+| "Results cannot be saved in …" | The folder is read-only (a network share, say). Copy the images to a folder you can write to, and open that one |
 | `konimeter: command not found`, or `ModuleNotFoundError` for `sem_particle_analysis` or `sem_analysis_app` | The environment is not active, or `pip install -e .` was not run in it |
 
 Anything else: please [open an issue](https://github.com/SanjayPradeep97/Konimeter/issues)

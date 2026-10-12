@@ -203,6 +203,17 @@ def visualize_three_masks(image, masks, labels):
     return img_array
 
 
+def _column_names(measurements):
+    """
+    Area and diameter headers in the unit the numbers are actually in.
+
+    Hard-coded nm used to label pixel counts as nanometres whenever an image
+    had no scale, which is the one case where the difference matters most.
+    """
+    unit = 'nm' if measurements.get('unit') == 'nm' else 'px'
+    return f'Area ({unit}²)', f'Diameter ({unit})'
+
+
 def create_results_dataframe(measurements):
     """
     Convert measurements dict to a formatted DataFrame for display.
@@ -215,14 +226,15 @@ def create_results_dataframe(measurements):
     """
     import pandas as pd
 
+    area, diameter = _column_names(measurements)
     if measurements['num_particles'] == 0:
-        return pd.DataFrame(columns=['Particle ID', 'Area (nm²)', 'Diameter (nm)'])
+        return pd.DataFrame(columns=['Particle ID', area, diameter])
 
     # Create DataFrame
     data = {
         'Particle ID': list(range(1, measurements['num_particles'] + 1)),
-        'Area (nm²)': [f"{a:.1f}" for a in measurements['areas']],
-        'Diameter (nm)': [f"{d:.1f}" for d in measurements['diameters']],
+        area: [f"{a:.1f}" for a in measurements['areas']],
+        diameter: [f"{d:.1f}" for d in measurements['diameters']],
     }
 
     df = pd.DataFrame(data)
@@ -246,17 +258,18 @@ def create_summary_statistics_table(measurements):
 
     areas = np.array(measurements['areas'])
     diameters = np.array(measurements['diameters'])
+    area, diameter = _column_names(measurements)
 
     stats_data = {
         'Metric': ['Mean', 'Median', 'Std Dev', 'Min', 'Max'],
-        'Area (nm²)': [
+        area: [
             f"{np.mean(areas):.1f}",
             f"{np.median(areas):.1f}",
             f"{np.std(areas):.1f}",
             f"{np.min(areas):.1f}",
             f"{np.max(areas):.1f}"
         ],
-        'Diameter (nm)': [
+        diameter: [
             f"{np.mean(diameters):.1f}",
             f"{np.median(diameters):.1f}",
             f"{np.std(diameters):.1f}",

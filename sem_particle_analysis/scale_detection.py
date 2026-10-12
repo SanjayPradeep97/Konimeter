@@ -12,6 +12,7 @@ Supports two detection methods:
 import math
 import os
 import re
+import unicodedata
 import logging
 import cv2
 import numpy as np
@@ -19,6 +20,19 @@ import numpy as np
 from .utils import extract_tiff_metadata
 
 logger = logging.getLogger(__name__)
+
+# Metadata units, in nanometres. "µ" is looked up after NFKC normalisation, which
+# turns the micro sign (U+00B5) into the Greek mu (U+03BC); instruments write
+# either, and a regex matching case-insensitively treats them as the same letter.
+_METADATA_UNIT_TO_NM = {"m": 1e9, "mm": 1e6, "um": 1e3, "μm": 1e3, "nm": 1.0}
+
+
+def _length_to_nm(value, unit):
+    """A metadata length in nanometres; raises ValueError for an unknown unit."""
+    key = unicodedata.normalize("NFKC", unit or "").strip().lower()
+    if key not in _METADATA_UNIT_TO_NM:
+        raise ValueError(f"unknown unit {unit!r}")
+    return float(value) * _METADATA_UNIT_TO_NM[key]
 
 
 class OCRUnavailableError(ValueError):
@@ -128,7 +142,6 @@ class ScaleDetector:
 
     # Registry for custom tag parsers (extensibility for new microscope formats)
     # Format: {tag_code: [(parser_func, manufacturer_name), ...]}
-    _TAG_PARSERS = {}
 
     # Manufacturer detection patterns for ImageDescription parsing
     MANUFACTURER_PATTERNS = {
@@ -288,15 +301,6 @@ class ScaleDetector:
                 metadata_source = 'TESCAN metadata'
                 confidence = 'medium'
 
-        # Try generic resolution tags as fallback
-        if pixel_size_nm is None:
-            pixel_size_nm = self._parse_generic_resolution(metadata)
-            if pixel_size_nm:
-                metadata_source = 'TIFF XResolution/YResolution tags'
-                confidence = 'medium'
-                if manufacturer == 'unknown':
-                    confidence = 'low'
-
         # Try generic pixel size patterns in ImageDescription
         if pixel_size_nm is None and image_desc:
             pixel_size_nm = self._parse_generic_pixel_size(image_desc)
@@ -333,25 +337,16 @@ class ScaleDetector:
                     confidence = 'high'
                     manufacturer = 'fei'
 
-        # Try registered custom tag parsers
-        if pixel_size_nm is None and self._TAG_PARSERS:
-            for tag_code, parsers in self._TAG_PARSERS.items():
-                tag_val = metadata['raw_tags'].get(tag_code)
-                if tag_val is not None:
-                    for parser_func, mfr_name in parsers:
-                        try:
-                            parsed = parser_func(tag_val)
-                            if parsed and parsed > 0:
-                                pixel_size_nm = parsed
-                                manufacturer = mfr_name
-                                metadata_source = f'Registered parser ({mfr_name}, tag {tag_code})'
-                                confidence = 'medium'
-                                break
-                        except Exception as e:
-                            logger.debug(f"Custom parser for {mfr_name} failed: {e}")
-                            continue
-                if pixel_size_nm:
-                    break
+        # Last, the generic resolution tags. Most programs fill them with a print
+        # resolution, not the microscope's calibration, so a value from here is
+        # flagged for the analyst to confirm against the scale bar.
+        generic_resolution = False
+        if pixel_size_nm is None:
+            pixel_size_nm = self._parse_generic_resolution(metadata)
+            if pixel_size_nm:
+                metadata_source = 'TIFF XResolution/YResolution tags'
+                confidence = 'low'
+                generic_resolution = True
 
         if pixel_size_nm is None:
             raise ValueError(
@@ -373,6 +368,7 @@ class ScaleDetector:
             'manufacturer': manufacturer,
             'confidence': confidence,
             'metadata_source': metadata_source,
+            'generic_resolution': generic_resolution,
             'raw_metadata': metadata
         }
 
@@ -594,19 +590,21 @@ class ScaleDetector:
         if not image_desc:
             return None
 
-        # Look for AP_PIXEL_SIZE
+        # "Pixel Size = 2.791 nm" states its unit; a bare AP_PIXEL_SIZE value is
+        # in metres. A bare "Pixel Size" is left to the generic parser rather
+        # than guessed at.
         patterns = [
-            r'AP_PIXEL_SIZE\s*=\s*([0-9.eE+-]+)',
-            r'Pixel\s*Size\s*=\s*([0-9.eE+-]+)',
+            (r'Pixel\s*Size\s*=\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)\b', None),
+            (r'AP_PIXEL_SIZE\s*=\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)\b', None),
+            (r'AP_PIXEL_SIZE\s*=\s*([0-9.eE+-]+)', "m"),
         ]
 
-        for pattern in patterns:
+        for pattern, implied_unit in patterns:
             match = re.search(pattern, image_desc, re.IGNORECASE)
             if match:
                 try:
-                    # Value is in meters, convert to nanometers
-                    value_m = float(match.group(1))
-                    return value_m * 1e9
+                    unit = implied_unit or match.group(2)
+                    return _length_to_nm(match.group(1), unit)
                 except ValueError:
                     continue
 
@@ -630,9 +628,9 @@ class ScaleDetector:
 
         # Look for common JEOL patterns
         patterns = [
-            r'PixelSize\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|m)',
-            r'Pixel\s*Size\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|m)',
-            r'Resolution\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|m)/pixel',
+            r'PixelSize\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)',
+            r'Pixel\s*Size\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)',
+            r'Resolution\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)/pixel',
         ]
 
         for pattern in patterns:
@@ -643,12 +641,7 @@ class ScaleDetector:
                     unit = match.group(2).lower()
 
                     # Convert to nanometers
-                    if unit in ('m',):
-                        return value * 1e9
-                    elif unit in ('um', 'µm'):
-                        return value * 1000
-                    else:  # nm
-                        return value
+                    return _length_to_nm(value, unit)
                 except (ValueError, IndexError):
                     continue
 
@@ -690,8 +683,8 @@ class ScaleDetector:
         # Fallback to ImageDescription patterns
         if image_desc:
             patterns = [
-                r'PixelSize\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|m)',
-                r'Pixel\s*Size\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|m)',
+                r'PixelSize\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)',
+                r'Pixel\s*Size\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)',
             ]
 
             for pattern in patterns:
@@ -701,12 +694,7 @@ class ScaleDetector:
                         value = float(match.group(1))
                         unit = match.group(2).lower()
 
-                        if unit in ('m',):
-                            return value * 1e9
-                        elif unit in ('um', 'µm'):
-                            return value * 1000
-                        else:
-                            return value
+                        return _length_to_nm(value, unit)
                     except (ValueError, IndexError):
                         continue
 
@@ -728,8 +716,8 @@ class ScaleDetector:
 
         # Look for TESCAN patterns
         patterns = [
-            r'PixelSize\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|m)',
-            r'Pixel\s*Width\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|m)',
+            r'PixelSize\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)',
+            r'Pixel\s*Width\s*[:=]\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)',
         ]
 
         for pattern in patterns:
@@ -739,12 +727,7 @@ class ScaleDetector:
                     value = float(match.group(1))
                     unit = match.group(2).lower()
 
-                    if unit in ('m',):
-                        return value * 1e9
-                    elif unit in ('um', 'µm'):
-                        return value * 1000
-                    else:
-                        return value
+                    return _length_to_nm(value, unit)
                 except (ValueError, IndexError):
                     continue
 
@@ -942,7 +925,7 @@ class ScaleDetector:
             line = self._find_scale_line_morphological(binary255, max_thickness=max_thickness)
             if line is not None:
                 leftmost, rightmost, row, spanned, area = line
-                candidates[pol] = {"length": rightmost - leftmost, "area": area}
+                candidates[pol] = {"length": rightmost - leftmost + 1, "area": area}
                 # A bar with clear background on both sides always beats one that
                 # ran to the crop edge, regardless of size. Otherwise the larger
                 # solid rule wins: comparing the two polarities on width alone let
@@ -965,7 +948,9 @@ class ScaleDetector:
             )
 
         leftmost, rightmost, top_row, spanned_crop, _bar_area = best_line
-        pixel_length = rightmost - leftmost
+        # Both columns are the bar's own pixels, so it covers one more than
+        # their difference; dropping the one overstated nm/px by 1/length.
+        pixel_length = rightmost - leftmost + 1
 
         if pixel_length < 5:
             raise ValueError(

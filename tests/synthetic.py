@@ -91,8 +91,10 @@ def make_micrograph(
 
     fill = (bar_gray, bar_gray, bar_gray)
     bar_top = image_height + databar_height // 2
+    # PIL's rectangle includes both corners, so the far edge is length - 1: the
+    # bar covers exactly bar_length_px pixels, which is what "truth" claims.
     draw.rectangle(
-        [bar_left, bar_top, bar_left + bar_length_px, bar_top + bar_thickness],
+        [bar_left, bar_top, bar_left + bar_length_px - 1, bar_top + bar_thickness - 1],
         fill=fill,
     )
 
@@ -179,8 +181,10 @@ def make_burnin_micrograph(
 
     fill = (bar_gray, bar_gray, bar_gray)
     bar_top = height - bar_bottom_margin - bar_thickness
+    # PIL's rectangle includes both corners, so the far edge is length - 1: the
+    # bar covers exactly bar_length_px pixels, which is what "truth" claims.
     draw.rectangle(
-        [bar_left, bar_top, bar_left + bar_length_px, bar_top + bar_thickness],
+        [bar_left, bar_top, bar_left + bar_length_px - 1, bar_top + bar_thickness - 1],
         fill=fill,
     )
     font = _load_font(text_size)

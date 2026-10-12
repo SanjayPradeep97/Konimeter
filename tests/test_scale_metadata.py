@@ -163,3 +163,34 @@ class TestTierOne:
         monkeypatch.setitem(sys.modules, "easyocr", None)
         path = write_tiff(tmp_path / "fei.tif", description="[Scan]\nPixelWidth=2.5e-9\n")
         assert sc.from_metadata(detector, path).nm_per_px == pytest.approx(2.5)
+
+
+class TestUnitsAreReadAsWritten:
+    """A misread unit is a silent factor of a thousand on every measurement."""
+
+    @pytest.mark.parametrize("mu", ["µ", "μ"])   # micro sign, Greek mu
+    def test_either_mu_means_micrometres(self, detector, tmp_path, mu):
+        path = write_tiff(tmp_path / "jeol.tif",
+                          description=f"JEOL JSM\nPixelSize = 0.5 {mu}m\n".encode("utf-8"))
+        result = detector.detect_scale_from_metadata(str(path))
+        assert result["conversion"] == pytest.approx(500.0)
+
+    def test_a_zeiss_pixel_size_in_nm_is_not_taken_for_metres(self, detector):
+        assert detector._parse_zeiss_metadata(
+            "SmartSEM\nPixel Size = 2.791 nm\n", {}) == pytest.approx(2.791)
+
+    def test_a_bare_ap_pixel_size_is_in_metres(self, detector):
+        assert detector._parse_zeiss_metadata(
+            "AP_PIXEL_SIZE = 2.791e-09\n", {}) == pytest.approx(2.791)
+
+
+class TestAPrintResolutionIsNotTrusted:
+    def test_an_unusual_dpi_is_offered_but_left_unconfirmed(self, detector, tmp_path):
+        # Most programs write a print resolution here. 400 dpi would otherwise
+        # become a trusted 63,500 nm/px.
+        path = write_tiff(tmp_path / "dpi400.tif", resolution=(400, 400), resolution_unit=2)
+        calibration = sc.from_metadata(detector, path)
+        assert calibration.method == "tiff_resolution"
+        assert not calibration.trustworthy
+        assert calibration.provenance == "tiff_resolution+unconfirmed"
+        assert calibration.warning

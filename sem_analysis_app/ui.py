@@ -19,11 +19,13 @@ from .callbacks import (
     initialize_sam,
     load_images_from_folder,
     restore_session,
+    restore_setup,
     current_save_dataset,
     set_save_dataset,
     download_model,
     CHECKPOINTS_FOUND,
     CHECKPOINTS_MISSING,
+    current_frame_controls,
     select_image_from_gallery,
     # scale and frame
     accept_from_work_tab,
@@ -197,17 +199,6 @@ def create_interface():
                                  "Shift + right-click it → Copy as path; in "
                                  "Finder, select it and press ⌥⌘C.",
                         )
-                        with gr.Accordion("Save results somewhere else", open=False):
-                            results_file_input = gr.Textbox(
-                                label="Results file",
-                                max_lines=1,
-                                placeholder="Leave empty to use analysis_results.csv "
-                                            "in the image folder",
-                                info="For a folder you cannot write to, or to keep "
-                                     "adding to a results file from an earlier "
-                                     "session. A folder here gets its own "
-                                     "analysis_results.csv.",
-                            )
                         load_btn = gr.Button("📁 Load images", variant="primary",
                                              size="lg", interactive=False)
                         load_status = gr.Textbox(label="Status", interactive=False)
@@ -340,9 +331,9 @@ def create_interface():
 
                         with gr.Group(visible=False) as tier3_controls:
                             gr.Markdown(
-                                "**Tier 3.** Click each end of the bar. A magnifier "
-                                "follows the cursor so you can land on the exact "
-                                "pixel, then type the printed length."
+                                "**Tier 3.** Click the outer edge of each end of the "
+                                "bar. A magnifier follows the cursor so you can land "
+                                "exactly on the edge, then type the printed length."
                             )
                             point_readout = gr.Textbox(label="Points", interactive=False)
                             with gr.Row():
@@ -471,7 +462,8 @@ def create_interface():
                 save_status = gr.Textbox(label="", interactive=False, show_label=False)
 
                 with gr.Accordion("Measurements for this image", open=False):
-                    refine_results = gr.Dataframe(label="", show_label=False)
+                    refine_results = gr.Dataframe(label="", show_label=False,
+                                                  headers=["Particle ID", "Area", "Diameter"])
 
             # ============================================================
             # TAB 4: Results
@@ -479,8 +471,10 @@ def create_interface():
             with gr.Tab("💾 Results", id=4):
                 gr.Markdown("### This image", elem_classes=["step-title"])
                 with gr.Row():
-                    current_results = gr.Dataframe(label="Particles")
-                    current_stats = gr.Dataframe(label="Summary")
+                    current_results = gr.Dataframe(label="Particles",
+                                                   headers=["Particle ID", "Area", "Diameter"])
+                    current_stats = gr.Dataframe(label="Summary",
+                                                 headers=["Metric", "Area", "Diameter"])
 
                 gr.Markdown("---")
                 gr.Markdown("### Whole session", elem_classes=["step-title"])
@@ -488,7 +482,8 @@ def create_interface():
                 with gr.Row():
                     summary_progress = gr.Markdown("No results yet")
                     summary_particle_stats = gr.Markdown("No particle statistics yet")
-                session_table = gr.Dataframe(label="Processed images")
+                session_table = gr.Dataframe(label="Processed images",
+                                             headers=["Filename", "Particle Count"])
 
                 with gr.Accordion("Fix up the results file", open=False):
                     with gr.Row():
@@ -534,7 +529,8 @@ def create_interface():
         # scale and frame, then segment. Kept as one list so the three entry
         # points cannot drift apart.
         OPEN_OUTPUTS = [scale_image_in, tier1_status, scale_summary, point_readout,
-                        frame_status, header, mask_viz, segment_status, mask_choice]
+                        frame_status, header, mask_viz, segment_status, mask_choice,
+                        click_mode_radio, point_type_radio]
         RELOAD_CANVAS = "() => { window.SCALE && window.SCALE.load(); }"
 
         # Everything that shows what the scale is and how much it should be
@@ -558,16 +554,21 @@ def create_interface():
         download_btn.click(download_model,
                            outputs=[init_status, sam_file, download_btn, load_btn,
                                     init_sam_btn])
-        load_btn.click(load_images_from_folder,
-                       inputs=[folder_input, results_file_input],
-                       outputs=[load_status, gallery])
+        load_btn.click(load_images_from_folder, inputs=[folder_input],
+                       outputs=[load_status, gallery, tabs])
         save_dataset_box.change(set_save_dataset, inputs=[save_dataset_box],
                                 outputs=[save_dataset_box])
 
-        # A refresh reconnects to the same process-wide session, so bring the
-        # gallery back rather than showing an empty one.
+        # A refresh reconnects to the same process-wide session, but the page is
+        # built once, at start-up: bring back what the session has rather than
+        # showing start-up defaults over it.
         app.load(restore_session, outputs=[gallery, load_status])
         app.load(current_save_dataset, outputs=[save_dataset_box])
+        app.load(restore_setup,
+                 outputs=[sam_file, download_btn, init_sam_btn, init_status, load_btn])
+        app.load(current_frame_controls,
+                 outputs=[modality_choice, particle_choice, crop_manual, crop_override,
+                          min_particle_size_slider])
 
         # ---- Gallery ----
         gallery.select(
@@ -679,7 +680,8 @@ def create_interface():
         clear_pending_btn.click(clear_pending_changes,
                                 outputs=[refine_viz, refine_status])
         undo_btn.click(undo_last_action,
-                       outputs=[refine_viz, refine_results, refine_status]).then(
+                       outputs=[refine_viz, refine_results, refine_status,
+                                current_results, current_stats]).then(
             frame_header, outputs=[header])
 
         clear_edges_btn.click(
@@ -716,7 +718,7 @@ def create_interface():
         delete_row_btn.click(delete_result_row, inputs=[delete_row_dropdown],
                              outputs=[session_table, summary_progress,
                                       summary_particle_stats, delete_row_dropdown,
-                                      delete_row_status])
+                                      delete_row_status, gallery])
         remove_duplicates_btn.click(check_and_remove_duplicates,
                                     outputs=[session_table, duplicates_status])
         export_btn.click(export_results, outputs=[export_file, export_status])
@@ -724,5 +726,13 @@ def create_interface():
         # ---- Plots ----
         update_plots_btn.click(update_histogram_plots,
                                outputs=[histogram_plot, plot_status])
+
+    # Every callback reads and writes the one process-wide state, so they run one
+    # at a time. In separate queues, a gallery click during Save & next's
+    # segmentation could finish in between and file one image's mask under
+    # another's name.
+    for event in app.fns.values():
+        event.concurrency_id = "konimeter"
+        event.concurrency_limit = 1
 
     return app

@@ -88,6 +88,27 @@ class TestAnalysableRegion:
         assert not region[y0 + h // 2, x0 + w // 2]
         assert region[100, 500]
 
+    def test_a_box_at_the_frame_edge_gets_only_its_margin(self):
+        # The far edge was computed from the near edge after clamping it to the
+        # frame, so a box near the left or top excluded up to a margin's worth
+        # of specimen too much on its other side.
+        image = np.full((100, 100), 128, dtype=np.uint8)
+        region, _ = reg.analysable_region(image, exclude_boxes=[(2, 3, 20, 10)],
+                                          margin=6)
+        excluded_cols = np.where(~region.all(axis=0))[0]
+        excluded_rows = np.where(~region.all(axis=1))[0]
+        assert (excluded_cols.min(), excluded_cols.max()) == (0, 2 + 20 + 6 - 1)
+        assert (excluded_rows.min(), excluded_rows.max()) == (0, 3 + 10 + 6 - 1)
+
+    def test_a_box_inside_the_frame_gets_its_margin_all_round(self):
+        image = np.full((100, 100), 128, dtype=np.uint8)
+        region, _ = reg.analysable_region(image, exclude_boxes=[(40, 50, 20, 10)],
+                                          margin=6)
+        cols = np.where(~region.all(axis=0))[0]
+        rows = np.where(~region.all(axis=1))[0]
+        assert (cols.min(), cols.max()) == (34, 65)
+        assert (rows.min(), rows.max()) == (44, 65)
+
     def test_ignores_malformed_boxes(self):
         image, _ = make_burnin_micrograph()
         region, info = reg.analysable_region(image, exclude_boxes=[None, (1, 2, 3)])

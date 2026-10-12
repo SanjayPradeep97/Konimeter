@@ -6,7 +6,13 @@ import argparse
 
 from pathlib import Path
 
-from .ui import APP_CSS, create_interface
+import matplotlib
+
+# Before anything imports pyplot. Plots are drawn in Gradio's worker threads,
+# where a GUI backend is liable to crash the app, TkAgg on Windows especially.
+matplotlib.use("Agg")
+
+from .ui import APP_CSS, create_interface  # noqa: E402
 
 # The Scale tab draws on a canvas and needs its own client code; Gradio
 # injects it through launch(head=...).

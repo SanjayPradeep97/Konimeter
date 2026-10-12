@@ -181,13 +181,79 @@ class TestRefinementOperations:
         assert len(analyzed.regions) == 1
         assert label not in [r.label for r in analyzed.regions] or len(analyzed.regions) == 1
 
-    def test_merge_reports_failure_when_particles_are_far_apart(self, analyzed):
-        # Closing with a radius-1 disk cannot bridge a 200px gap. The operation
-        # must say so rather than silently leaving the count unchanged.
-        labels = [r.label for r in analyzed.regions]
-        analyzed.merge_particles(labels)
-        assert analyzed.last_merge_succeeded is False
-        assert len(analyzed.regions) == 2
+    def test_merge_bridges_particles_that_do_not_touch(self, analyzed):
+        # Fragments of one broken particle are rarely within the pixel or two a
+        # closing can join, and merging them used to fail outright. They are now
+        # joined by a thin bridge, whose pixels count towards the area.
+        areas = sum(r.area for r in analyzed.regions)
+        (a, b) = analyzed.regions
+        gap = np.hypot(*np.subtract(a.centroid, b.centroid)) - 30 - 45
+
+        analyzed.merge_particles([r.label for r in analyzed.regions])
+
+        assert analyzed.last_merge_succeeded is True
+        assert len(analyzed.regions) == 1
+        added = analyzed.last_merge_added_px
+        assert analyzed.regions[0].area == areas + added
+        # One to two pixels wide along the gap, and no more.
+        assert gap <= added <= 2 * gap + 4
+
+    def test_merge_chains_every_fragment_into_one(self):
+        # A fibre broken in three: the end pieces must both be joined, not just
+        # one of them to the middle.
+        mask = np.zeros((100, 300), dtype=bool)
+        mask[45:55, 20:90] = True
+        mask[45:55, 110:180] = True
+        mask[45:55, 205:280] = True
+        analyzer = ParticleAnalyzer(min_size=30)
+        analyzer.analyze_mask(mask, remove_border=False)
+        assert len(analyzer.regions) == 3
+        before = analyzer.mask.copy()
+
+        analyzer.merge_particles([r.label for r in analyzer.regions])
+
+        assert analyzer.last_merge_succeeded is True
+        assert len(analyzer.regions) == 1
+        # Nothing of the fragments was lost or reshaped; only bridges were added.
+        assert analyzer.mask[before].all()
+        assert analyzer.last_merge_added_px <= 2 * (20 + 25)
+
+    def test_merge_will_not_take_in_a_particle_that_was_not_selected(self):
+        # The straight bridge between the outer two runs through the middle
+        # one. Merging that in silently would be a wrong number.
+        mask = np.zeros((100, 300), dtype=bool)
+        mask[40:60, 20:60] = True
+        mask[40:60, 130:170] = True
+        mask[40:60, 240:280] = True
+        analyzer = ParticleAnalyzer(min_size=30)
+        analyzer.analyze_mask(mask, remove_border=False)
+        left = analyzer.labeled_mask[50, 40]
+        right = analyzer.labeled_mask[50, 260]
+        before = analyzer.mask.copy()
+
+        analyzer.merge_particles([left, right])
+
+        assert analyzer.last_merge_succeeded is False
+        assert len(analyzer.regions) == 3
+        assert np.array_equal(analyzer.mask, before)
+
+    def test_a_close_neighbour_does_not_block_a_merge(self):
+        # A third particle a pixel away from one fragment's far side: the
+        # closing must not reach it, so the merge goes ahead without it.
+        mask = np.zeros((100, 200), dtype=bool)
+        mask[40:60, 20:60] = True
+        mask[40:60, 90:130] = True
+        mask[40:60, 132:170] = True     # 2 px from the right fragment
+        analyzer = ParticleAnalyzer(min_size=30)
+        analyzer.analyze_mask(mask, remove_border=False)
+        neighbour_area = analyzer.regions[2].area
+        left, right = analyzer.labeled_mask[50, 40], analyzer.labeled_mask[50, 100]
+
+        analyzer.merge_particles([left, right])
+
+        assert analyzer.last_merge_succeeded is True
+        assert len(analyzer.regions) == 2
+        assert analyzer.regions[analyzer.labeled_mask[50, 150] - 1].area == neighbour_area
 
     def test_merge_succeeds_for_touching_particles(self):
         mask = np.zeros((200, 200), dtype=bool)
@@ -235,6 +301,78 @@ class TestRefinementOperations:
 
 
 class TestCleanupConsistency:
+    """
+    Editing one particle must never change another.
+
+    analyze_mask cleaned, then cut the border strip; every edit then cleaned
+    the whole mask again. The cut left shreds the opening removes, so the first
+    edit — of anything — changed the areas of particles at the frame edge, and
+    Undo, which cleaned too, did not bring the original numbers back.
+    """
+
+    @staticmethod
+    def ragged(seed=3, shape=(512, 512)):
+        """SAM-like ragged blobs, many of them cut by the frame."""
+        from scipy import ndimage as ndi
+
+        noise = ndi.gaussian_filter(np.random.default_rng(seed).normal(size=shape), 4)
+        return noise > np.quantile(noise, 0.85)
+
+    def test_the_analysed_mask_is_a_fixed_point_of_its_cleanup(self):
+        analyzer = ParticleAnalyzer(conversion_factor=1.0, min_size=30)
+        analyzer.analyze_mask(self.ragged(), remove_border=True, border_buffer=4)
+        again = analyzer._prepare(analyzer.mask, 30, True, 4)
+        assert np.array_equal(again, analyzer.mask)
+
+    def test_every_mask_pixel_is_measured(self):
+        # Nothing hidden in the mask that is not a particle, waiting to be
+        # joined to one by a later edit.
+        analyzer = ParticleAnalyzer(conversion_factor=1.0, min_size=30)
+        analyzer.analyze_mask(self.ragged(), remove_border=True, border_buffer=4)
+        assert sum(r.area for r in analyzer.regions) == analyzer.mask.sum()
+        assert min(r.area for r in analyzer.regions) >= 30
+
+    def test_deleting_one_leaves_every_other_pixel_alone(self):
+        analyzer = ParticleAnalyzer(conversion_factor=1.0, min_size=30)
+        analyzer.analyze_mask(self.ragged(), remove_border=True, border_buffer=4)
+        victim = max(analyzer.regions, key=lambda r: r.area).label
+        expected = analyzer.mask & (analyzer.labeled_mask != victim)
+
+        analyzer.delete_particles([victim])
+
+        assert np.array_equal(analyzer.mask, expected)
+
+    def test_a_particle_re_added_measures_as_it_did_first_time(self):
+        # A particle running off the frame, deleted and added back exactly as
+        # SAM found it, must come back clipped at the same border strip.
+        mask, _ = make_disk_mask(shape=(300, 300),
+                                 centers_radii=((150, 150, 20), (5, 80, 20)))
+        analyzer = ParticleAnalyzer(conversion_factor=1.0, min_size=30)
+        analyzer.analyze_mask(mask, remove_border=True, border_buffer=4)
+        edge = analyzer.labeled_mask[80, 10]
+        first = analyzer.mask & (analyzer.labeled_mask == edge)
+
+        analyzer.delete_particles([edge])
+        yy, xx = np.mgrid[0:300, 0:300]
+        analyzer.add_particle_from_sam((xx - 5) ** 2 + (yy - 80) ** 2 <= 400)
+
+        again = analyzer.labeled_mask == analyzer.labeled_mask[80, 10]
+        assert np.array_equal(again, first)
+
+    def test_an_addition_outside_the_analysable_region_adds_nothing(self):
+        # SAM will segment a burned-in scale bar if asked; it is not a particle.
+        mask, _ = make_disk_mask(shape=(300, 300), centers_radii=((150, 150, 20),))
+        analyzer = ParticleAnalyzer(conversion_factor=1.0, min_size=30)
+        analyzer.analyze_mask(mask, remove_border=True)
+        region = np.ones((300, 300), dtype=bool)
+        region[250:290, 190:290] = False
+        bar = np.zeros((300, 300), dtype=bool)
+        bar[265:275, 210:270] = True
+
+        assert not analyzer.prepare_addition(bar, region=region).any()
+        analyzer.add_particle_from_sam(bar, region=region)
+        assert len(analyzer.regions) == 1
+
     def test_a_particle_measures_the_same_before_and_after_an_edit(self):
         # analyze_mask and the refinement operations must apply identical
         # cleanup, or a particle's reported area shifts the first time the

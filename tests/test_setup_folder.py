@@ -34,10 +34,11 @@ def write_png(path):
 
 @pytest.fixture(autouse=True)
 def fresh_state():
-    saved = (state.image_paths, state.results_manager, state.processed_images)
+    saved = dict(vars(state))
     state.image_paths, state.results_manager, state.processed_images = [], None, {}
     yield
-    state.image_paths, state.results_manager, state.processed_images = saved
+    vars(state).clear()
+    vars(state).update(saved)
 
 
 @pytest.fixture
@@ -53,9 +54,10 @@ def sample_folder(tmp_path):
     return folder
 
 
-def load(folder, results_file=""):
-    return setup_tab.load_images_from_folder(str(folder), results_file,
-                                             progress=no_progress)
+def load(folder):
+    status, gallery, _tabs = setup_tab.load_images_from_folder(str(folder),
+                                                               progress=no_progress)
+    return status, gallery
 
 
 class TestFindingImages:
@@ -79,7 +81,11 @@ class TestWhereResultsGo:
         expected = sample_folder / "analysis_results.csv"
         assert expected.exists()
         assert os.path.samefile(state.results_manager.csv_file, expected)
-        assert str(expected) in status
+
+    def test_opening_a_folder_goes_to_the_gallery(self, sample_folder):
+        _status, _gallery, tabs = setup_tab.load_images_from_folder(
+            str(sample_folder), progress=no_progress)
+        assert tabs.selected == 1
 
     def test_a_pasted_path_may_be_quoted(self, sample_folder):
         # Explorer's "Copy as path" puts double quotes around it.
@@ -87,23 +93,23 @@ class TestWhereResultsGo:
         assert status.startswith("✅"), status
         assert len(state.image_paths) == 3
 
-    def test_a_results_folder_gets_its_own_results_file(self, sample_folder, tmp_path):
-        elsewhere = tmp_path / "results"
-        elsewhere.mkdir()
-        load(sample_folder, str(elsewhere))
 
-        assert (elsewhere / "analysis_results.csv").exists()
-        assert not (sample_folder / "analysis_results.csv").exists()
+class TestOpeningAnotherFolder:
+    def test_the_previous_image_is_not_carried_over(self, sample_folder, tmp_path):
+        # Saving after opening a second folder used to file the image still on
+        # screen from the first folder under the second folder's first name.
+        state.current_image = np.zeros((4, 4, 3), np.uint8)
+        state.analyzer = object()
+        state.scale_calibration = object()
+        load(sample_folder)
+        assert state.current_image is None
+        assert state.analyzer is None
+        assert state.scale_calibration is None
 
-    def test_progress_kept_with_the_results(self, sample_folder, tmp_path):
-        elsewhere = tmp_path / "results"
-        elsewhere.mkdir()
-        load(sample_folder, str(elsewhere / "mine.csv"))
-        state.mark_processed(0, 3)
-        state.save_state()
-
-        assert (elsewhere / ".analysis_state.json").exists()
-        assert not (sample_folder / ".analysis_state.json").exists()
+        from sem_analysis_app.callbacks.results import save_current_results
+        status, _ = save_current_results()
+        assert status.startswith("❌")
+        assert len(pd.read_csv(sample_folder / "analysis_results.csv")) == 0
 
 
 class TestResuming:
@@ -124,11 +130,11 @@ class TestResuming:
 class TestRefusals:
     def test_no_path(self):
         status, gallery = load("   ")
-        assert status.startswith("❌") and gallery is None
+        assert status.startswith("❌")
 
     def test_a_path_that_is_not_a_folder(self, tmp_path):
         status, gallery = load(tmp_path / "missing")
-        assert status.startswith("❌") and gallery is None
+        assert status.startswith("❌")
         assert state.image_paths == []
 
     def test_a_folder_without_images(self, tmp_path):
@@ -143,6 +149,44 @@ class TestRefusals:
             status, gallery = load(sample_folder)
         finally:
             sample_folder.chmod(0o755)
-        assert status.startswith("❌") and gallery is None
-        assert "Save results somewhere else" in status
+        assert status.startswith("❌") and "Copy the images" in status
         assert state.image_paths == []
+
+    @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
+                        reason="needs POSIX permissions and a non-root user")
+    def test_a_read_only_folder_with_results_is_refused_before_any_work(self, sample_folder):
+        # The results file existing used to be enough to pass, and the first
+        # save then failed after writing half of what it should have.
+        pd.DataFrame({"file_name": ["A_0001.tif"], "num_particles": [7]}).to_csv(
+            sample_folder / "analysis_results.csv", index=False)
+        sample_folder.chmod(0o555)
+        try:
+            status, _ = load(sample_folder)
+        finally:
+            sample_folder.chmod(0o755)
+        assert status.startswith("❌")
+        assert state.image_paths == []
+
+
+class TestReconnecting:
+    """A browser refresh shows the session as it is, not the start-up page."""
+
+    def test_without_a_model_load_images_stays_off(self):
+        state.sam_model = None
+        *_, load_images = setup_tab.restore_setup()
+        assert load_images["interactive"] is False
+
+    def test_with_a_model_it_is_named_and_images_can_be_loaded(self):
+        class Device:
+            type = "cpu"
+
+        class Model:
+            checkpoint = "/weights/sam_vit_b_01ec64.pth"
+            model_type = "vit_b"
+            device = Device()
+
+        state.sam_model = Model()
+        checkpoints, _download, _load_model, status, load_images = setup_tab.restore_setup()
+        assert checkpoints["value"] == "/weights/sam_vit_b_01ec64.pth"
+        assert "vit_b" in status
+        assert load_images["interactive"] is True
