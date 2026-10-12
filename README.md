@@ -58,17 +58,16 @@ Then the package and everything else:
 pip install -e .
 ```
 
-### SAM weights
+### The SAM model
 
-```bash
-python download_sam_weights.py --model vit_b
-```
+The first time you start the app, its Setup tab offers **Download the SAM
+model** (ViT-B, 358 MB). It is saved in the `sam_weights/` folder inside your
+Konimeter folder, which is where the app looks every time it starts, so you
+download it once. ViT-B is fast enough to use interactively on a laptop.
 
-ViT-B (358 MB) is what the app loads by default, and is fast enough to use
-interactively on a laptop. ViT-H (2.4 GB) segments slightly better and can be
-picked from the app's dropdown once downloaded: `--model vit_b vit_h` fetches
-both. With no `--model` the script asks. Weights go to `sam_weights/`; to keep
-them somewhere else, set `SAM_WEIGHTS_DIR` to that folder.
+ViT-H (2.4 GB) segments slightly better. To add it to the app's list, run
+`python download_sam_weights.py --model vit_h` in the Konimeter folder. To keep
+weights somewhere else, set `SAM_WEIGHTS_DIR` to that folder.
 
 The app uses an NVIDIA GPU (CUDA) or Apple Silicon (MPS) when it finds one, and
 the CPU otherwise. The Setup tab says which, once the model is loaded.
@@ -101,7 +100,7 @@ OpenMP runtime and otherwise refuse to share a process.
 
 | Tab | What happens there |
 | --- | --- |
-| ⚙️ Setup | Load a SAM checkpoint, then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it. A results file elsewhere can be named instead |
+| ⚙️ Setup | Load the SAM model (the first time, download it with the button there), then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it. A results file elsewhere can be named instead |
 | 🖼️ Gallery | Pick an image. Ticked images already have saved results |
 | 📏 Scale & Frame | Establish the scale, and check what the app decided about the image (see below) |
 | 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include/exclude clicks. Every click and every applied change can be undone |
