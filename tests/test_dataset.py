@@ -8,8 +8,6 @@ it can be read back by something else: the classification pipeline reads
 as the results row lists them.
 """
 
-import csv
-
 import numpy as np
 import pandas as pd
 import pytest

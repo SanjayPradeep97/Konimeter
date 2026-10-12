@@ -21,6 +21,9 @@ from .callbacks import (
     restore_session,
     current_save_dataset,
     set_save_dataset,
+    download_model,
+    CHECKPOINTS_FOUND,
+    CHECKPOINTS_MISSING,
     select_image_from_gallery,
     # scale and frame
     accept_from_work_tab,
@@ -162,13 +165,17 @@ def create_interface():
                             choices=[str(p) for p in _checkpoints],
                             value=str(_checkpoints[0]) if _checkpoints else None,
                             allow_custom_value=True,
-                            info="Found in sam_weights/. Paste a path to use one "
-                                 "from elsewhere." if _checkpoints else
-                                 "None found — run python download_sam_weights.py, "
-                                 "or paste a path.",
+                            info=CHECKPOINTS_FOUND if _checkpoints else CHECKPOINTS_MISSING,
                         )
-                        init_sam_btn = gr.Button("⚡ Load model", variant="primary",
-                                                 size="lg")
+                        # Offered only while there is nothing to load, and then it
+                        # is the thing to press. Saved where the app looks on every
+                        # start, so it is needed once.
+                        download_btn = gr.Button(
+                            "⬇️ Download the SAM model (ViT-B, 358 MB)",
+                            variant="primary", size="lg", visible=not _checkpoints)
+                        init_sam_btn = gr.Button(
+                            "⚡ Load model", size="lg",
+                            variant="primary" if _checkpoints else "secondary")
                         init_status = gr.Textbox(label="Status", interactive=False)
 
                     with gr.Column():
@@ -548,6 +555,9 @@ def create_interface():
         # ---- Setup ----
         init_sam_btn.click(initialize_sam, inputs=[sam_file],
                            outputs=[init_status, load_btn])
+        download_btn.click(download_model,
+                           outputs=[init_status, sam_file, download_btn, load_btn,
+                                    init_sam_btn])
         load_btn.click(load_images_from_folder,
                        inputs=[folder_input, results_file_input],
                        outputs=[load_status, gallery])

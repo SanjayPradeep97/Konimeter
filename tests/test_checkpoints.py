@@ -61,17 +61,3 @@ class TestTheOfferedDefault:
         assert weights in {Path(p).parent for p in found}
 
 
-class TestTheBatchPathIsUnaffected:
-    def test_it_picks_by_type_not_by_order(self, weights):
-        # cli.find_checkpoint filters discover_checkpoints by model type, so
-        # reordering the list must not change which file --model-type vit_h
-        # resolves to.
-        from sem_particle_analysis.cli import find_checkpoint
-
-        found = discover_checkpoints(extra_dirs=[weights])
-        by_type = {infer_model_type(p, default=None): p for p in found}
-        assert by_type["vit_h"].name == "sam_vit_h_4b8939.pth"
-        # find_checkpoint searches the real directories rather than the fixture;
-        # what matters is that it selects on type at all.
-        resolved = find_checkpoint("vit_h")
-        assert resolved is None or infer_model_type(resolved) == "vit_h"

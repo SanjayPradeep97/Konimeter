@@ -7,8 +7,14 @@ import gradio as gr
 from sem_particle_analysis import (SAMModel, ScaleDetector, ParticleSegmenter,
                                    ResultsManager, discover_checkpoints,
                                    infer_model_type)
+from sem_particle_analysis import weights
 from sem_particle_analysis.utils import find_images_in_folder
 from ..state import state
+
+# What the checkpoint list says, depending on whether it found any.
+CHECKPOINTS_FOUND = "Found in sam_weights/. Paste a path to use one from elsewhere."
+CHECKPOINTS_MISSING = ("None yet: download the model with the button below, or paste "
+                       "the path of a checkpoint you already have.")
 from .gallery import create_image_gallery
 
 def resolve_checkpoint(value):
@@ -38,8 +44,8 @@ def initialize_sam(sam_path, progress=gr.Progress()):
     try:
         sam_path = resolve_checkpoint(sam_path)
         if sam_path is None:
-            return ("❌ No checkpoint at that path. Pick one from the list, or run "
-                    "python download_sam_weights.py"), gr.update(interactive=False)
+            return ("❌ No checkpoint at that path. Pick one from the list, or "
+                    "download the model with the button below."), gr.update(interactive=False)
 
         # Derived from the filename rather than chosen separately, so the
         # architecture can never disagree with the weights being loaded.
@@ -81,6 +87,38 @@ def clean_path(text):
     """
     text = str(text or "").strip().strip('"').strip("'").strip()
     return os.path.abspath(os.path.expanduser(text)) if text else ""
+
+
+def download_model(progress=gr.Progress()):
+    """
+    Download SAM ViT-B into Konimeter's weights folder, then load it.
+
+    For a first start, when there is nothing to load. The file goes where the
+    app looks every time it starts, so this is needed once.
+
+    Returns:
+        tuple: (status, checkpoint list update, download button update,
+        Load images button update, Load model button update)
+    """
+    def report(done, total):
+        if total:
+            progress(done / total, desc=f"Downloading SAM ViT-B: {done / 2**20:.0f} "
+                                        f"of {total / 2**20:.0f} MB")
+
+    try:
+        path = weights.download("vit_b", progress=report)
+    except Exception as problem:
+        return (f"❌ The download failed ({problem}). Check the internet connection "
+                "and try again.", gr.update(), gr.update(visible=True), gr.update(),
+                gr.update())
+
+    status, load_images = initialize_sam(str(path), progress=progress)
+    return (status,
+            gr.update(choices=[str(p) for p in discover_checkpoints()], value=str(path),
+                      info=CHECKPOINTS_FOUND),
+            gr.update(visible=False),
+            load_images,
+            gr.update(variant="primary"))
 
 
 def set_save_dataset(enabled):

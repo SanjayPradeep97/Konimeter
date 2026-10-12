@@ -25,9 +25,8 @@ class OCRUnavailableError(ValueError):
     """
     Raised when a scale bar must be read but EasyOCR is not installed.
 
-    Subclasses ValueError so that callers already handling a failed OCR attempt —
-    notably ``detect_scale(method='auto')``, which falls back to metadata — treat
-    a missing library as just another way for OCR not to produce an answer.
+    Subclasses ValueError so that callers already handling a failed OCR attempt
+    treat a missing library as just another way for OCR not to produce an answer.
     """
 
 
@@ -174,34 +173,6 @@ class ScaleDetector:
         ],
     }
 
-    # Confidence scoring for method comparison
-    CONFIDENCE_SCORES = {'high': 3, 'medium': 2, 'low': 1}
-
-    @classmethod
-    def register_tag_parser(cls, tag_code, manufacturer, parser_func):
-        """
-        Register a custom parser for a specific TIFF tag code.
-
-        This allows adding support for new microscope formats without
-        modifying the core ScaleDetector code. The parser function receives
-        the tag value and should return pixel size in nanometers, or None.
-
-        Args:
-            tag_code (int): TIFF tag code to handle
-            manufacturer (str): Manufacturer name for identification
-            parser_func (callable): Function(tag_value) -> float (nm) or None
-
-        Example:
-            ScaleDetector.register_tag_parser(
-                tag_code=50000,
-                manufacturer='oxford',
-                parser_func=lambda v: float(v.get('PixelSize', 0)) * 1e9
-            )
-        """
-        if tag_code not in cls._TAG_PARSERS:
-            cls._TAG_PARSERS[tag_code] = []
-        cls._TAG_PARSERS[tag_code].append((parser_func, manufacturer))
-
     def __init__(self, use_gpu=False):
         """
         Initialize the scale bar detector.
@@ -218,8 +189,6 @@ class ScaleDetector:
         self.use_gpu = use_gpu
         self._reader = None
         self.last_detection = None
-        self.last_metadata_result = None
-        self.last_ocr_result = None
 
     @property
     def reader(self):
@@ -245,176 +214,6 @@ class ScaleDetector:
             print("OCR reader initialized")
         return self._reader
 
-    # Where the OCR fallback used to look, and still does when a caller names a
-    # region explicitly.
-    DEFAULT_OCR_REGION = dict(region_x=0.75, region_y=0.95,
-                              region_width=0.5, region_height=0.08)
-
-    def detect_scale(self, image, file_path=None, method='auto',
-                     region_x=None, region_y=None,
-                     region_width=None, region_height=None,
-                     polarity='auto', threshold=200):
-        """
-        Detect scale using the best available method.
-
-        This is the main entry point for scale detection. In 'auto' mode, it
-        tries TIFF metadata first, then OCR. When both succeed, it cross-checks
-        the results and selects the most reliable one based on confidence scoring.
-
-        Args:
-            image (np.ndarray): RGB image array (required for OCR fallback)
-            file_path (str, optional): Path to image file for metadata extraction
-            method (str): Detection method - 'auto', 'metadata', or 'ocr'
-                - 'auto': Try both, compare confidence, cross-check (default)
-                - 'metadata': Only use metadata extraction (raises if fails)
-                - 'ocr': Only use OCR detection
-            region_x (float, optional): Horizontal center of OCR search region (0-1)
-            region_y (float, optional): Vertical center of OCR search region (0-1)
-            region_width (float, optional): Width fraction for OCR search region (0-1)
-            region_height (float, optional): Height fraction for OCR search region (0-1)
-                Leave all four unset — the usual case — to search every position a
-                scale bar is normally printed in. Naming any of them restricts the
-                search to that one region instead.
-            polarity (str): Scale bar polarity - 'auto', 'bright', or 'dark'
-            threshold (int): Binary threshold for OCR (0-255)
-
-        Returns:
-            dict: Detection results containing:
-                - 'conversion': Conversion factor (nm/pixel)
-                - 'method': Detection method used ('metadata' or 'ocr')
-                - 'scale_nm': Physical scale in nanometers
-                - 'pixel_length': Pixel length (1 for metadata, detected for OCR)
-                - 'cross_check': Cross-check info if both methods succeeded
-                - Additional method-specific fields
-
-        Raises:
-            ValueError: If scale cannot be detected by specified method
-        """
-        metadata_result = None
-        ocr_result = None
-
-        # Reset cross-check state
-        self.last_metadata_result = None
-        self.last_ocr_result = None
-
-        # --- Try metadata extraction ---
-        if method in ('auto', 'metadata') and file_path:
-            if self._is_tiff(file_path):
-                try:
-                    logger.info(f"Attempting TIFF metadata extraction from: {file_path}")
-                    metadata_result = self.detect_scale_from_metadata(file_path)
-                    metadata_result['method'] = 'metadata'
-                    self.last_metadata_result = metadata_result
-                    logger.info(f"Metadata extraction successful: {metadata_result['conversion']:.4f} nm/pixel")
-                except ValueError as e:
-                    logger.warning(f"Metadata extraction failed: {e}")
-                    if method == 'metadata':
-                        raise
-
-        # For 'metadata' only mode, return what we have
-        if method == 'metadata':
-            if metadata_result:
-                self.last_detection = metadata_result
-                return metadata_result
-            # A TIFF that was read and found wanting has already raised with
-            # the reason; what is left is a file that was never read.
-            if file_path:
-                raise ValueError("not a TIFF, and only TIFF files record a pixel size")
-            raise ValueError("no file to read a pixel size from")
-
-        # --- Try OCR ---
-        if method in ('auto', 'ocr'):
-            try:
-                logger.info("Attempting OCR-based scale bar detection")
-                region = {k: v for k, v in (
-                    ('region_x', region_x), ('region_y', region_y),
-                    ('region_width', region_width), ('region_height', region_height),
-                ) if v is not None}
-
-                if region:
-                    # An explicitly named region is used as given.
-                    ocr_result = self.detect_scale_bar(
-                        image, **{**self.DEFAULT_OCR_REGION, **region},
-                        polarity=polarity, threshold=threshold,
-                    )
-                else:
-                    # Nothing named, so look in all the usual places rather than
-                    # only the bottom-right. That default suits an SEM databar and
-                    # misses a TEM bar burned into the bottom-left entirely, which
-                    # left every TEM frame in a batch run measured in pixels while
-                    # the web app — which already swept — read them fine.
-                    ocr_result = self.detect_scale_bar_anywhere(
-                        image, polarity=polarity, threshold=threshold)
-                ocr_result['method'] = 'ocr'
-                ocr_result['confidence'] = 'medium'  # OCR is always medium confidence
-                self.last_ocr_result = ocr_result
-                logger.info(f"OCR detection successful: {ocr_result['conversion']:.4f} nm/pixel")
-            except ValueError as e:
-                logger.warning(f"OCR detection failed: {e}")
-                if method == 'ocr':
-                    raise
-
-        # --- Select best result and attach cross-check info ---
-        chosen = self._select_best_result(metadata_result, ocr_result)
-
-        if chosen is None:
-            raise ValueError("Could not detect scale using any available method")
-
-        self.last_detection = chosen
-        return chosen
-
-    def _select_best_result(self, metadata_result, ocr_result):
-        """
-        Select the best detection result and attach cross-check info.
-
-        When both methods succeed, compares confidence scores and attaches
-        cross-check information showing whether the two methods agree.
-
-        Args:
-            metadata_result (dict or None): Result from metadata extraction
-            ocr_result (dict or None): Result from OCR detection
-
-        Returns:
-            dict or None: The best result with cross-check info attached
-        """
-        if metadata_result and ocr_result:
-            # Cross-check: compare the two conversions
-            meta_conv = metadata_result['conversion']
-            ocr_conv = ocr_result['conversion']
-            ratio = meta_conv / ocr_conv if ocr_conv > 0 else float('inf')
-            agrees = 0.9 <= ratio <= 1.1  # Within 10%
-
-            cross_check = {
-                'metadata_conversion': meta_conv,
-                'ocr_conversion': ocr_conv,
-                'agrees': agrees,
-                'ratio': ratio,
-            }
-
-            # Select based on confidence
-            meta_score = self.CONFIDENCE_SCORES.get(
-                metadata_result.get('confidence', 'low'), 0)
-            ocr_score = self.CONFIDENCE_SCORES.get(
-                ocr_result.get('confidence', 'low'), 0)
-
-            if meta_score >= ocr_score:
-                chosen = metadata_result
-            else:
-                chosen = ocr_result
-
-            chosen['cross_check'] = cross_check
-            return chosen
-
-        # Only one result available
-        return metadata_result or ocr_result
-
-    def _is_tiff(self, file_path):
-        """Check if file is a TIFF based on extension."""
-        if not file_path:
-            return False
-        ext = os.path.splitext(file_path)[1].lower()
-        return ext in ('.tif', '.tiff')
-
     def detect_scale_from_metadata(self, file_path):
         """
         Extract scale information from TIFF metadata.
@@ -439,11 +238,14 @@ class ScaleDetector:
         Raises:
             ValueError: If no scale information found in metadata
         """
-        # Extract metadata
+        # Checked by name first, so a PNG or JPEG gets the reason rather than a
+        # TIFF reader's error with the file's full path in it.
+        if os.path.splitext(str(file_path))[1].lower() not in (".tif", ".tiff"):
+            raise ValueError("not a TIFF, and only TIFF files record a pixel size")
         metadata = extract_tiff_metadata(file_path)
 
         if not metadata['is_tiff']:
-            raise ValueError("Not a valid TIFF file")
+            raise ValueError("not a TIFF, and only TIFF files record a pixel size")
 
         image_desc = metadata.get('image_description', '') or ''
 
@@ -1650,7 +1452,7 @@ class ScaleDetector:
         # window that passed, so it reported the largest uniform-looking window
         # rather than the actual edge: it overestimated the height on real
         # databars, and claimed one on images that had none. Both cost real
-        # micrograph area, since cli.crop_databar trims whatever is reported.
+        # micrograph area, since the Scale tab trims whatever is reported.
         if not (self.DATABAR_MIN_HEIGHT_PX <= height <= int(H * self.DATABAR_MAX_FRACTION)):
             return result
 
@@ -1730,60 +1532,3 @@ class ScaleDetector:
             + "; ".join(errors)
         )
 
-    def crop_scale_bar(self, image, crop_percent=7.0):
-        """
-        Crop the bottom portion of an image to remove the scale bar.
-
-        Args:
-            image (np.ndarray): Input image
-            crop_percent (float): Percentage to crop from bottom
-
-        Returns:
-            np.ndarray: Cropped image
-        """
-        height = image.shape[0]
-        crop_height = int(height * (1 - crop_percent / 100))
-        return image[:crop_height, :].copy()
-
-    def get_conversion_factor(self):
-        """
-        Get the conversion factor from the last detection.
-
-        Returns:
-            float: Conversion factor (nm/pixel)
-
-        Raises:
-            RuntimeError: If no detection has been performed
-        """
-        if self.last_detection is None:
-            raise RuntimeError("No scale bar has been detected yet")
-        return self.last_detection['conversion']
-
-    def set_manual_scale(self, scale_nm, pixel_length):
-        """
-        Manually set the scale calibration.
-
-        Args:
-            scale_nm (float): Physical length in nanometers
-            pixel_length (int): Length in pixels
-
-        Returns:
-            float: Calculated conversion factor (nm/pixel)
-
-        Raises:
-            ValueError: If values are not positive
-        """
-        if scale_nm <= 0 or pixel_length <= 0:
-            raise ValueError("Scale and pixel length must be positive values")
-
-        conversion = scale_nm / pixel_length
-
-        self.last_detection = {
-            'pixel_length': pixel_length,
-            'scale_nm': scale_nm,
-            'conversion': conversion,
-            'ocr_text': 'Manual entry',
-            'manual': True
-        }
-
-        return conversion

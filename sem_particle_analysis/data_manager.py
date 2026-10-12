@@ -350,23 +350,6 @@ class ResultsManager:
         print(f"Deleted {deleted_count} duplicate entries (kept {keep})")
         return deleted_count
 
-    def export_results(self, output_file):
-        """
-        Export current results to a new CSV file.
-
-        Args:
-            output_file (str): Output file path
-
-        Returns:
-            bool: True if successful
-        """
-        if not output_file.endswith('.csv'):
-            output_file += '.csv'
-
-        self.results_df.to_csv(output_file, index=False)
-        print(f"Exported {len(self.results_df)} results to '{output_file}'")
-        return True
-
     def get_summary(self):
         """
         Get a summary of all stored results.
@@ -389,35 +372,6 @@ class ResultsManager:
             'min_particles': int(self.results_df['num_particles'].min()),
             'max_particles': int(self.results_df['num_particles'].max())
         }
-
-    def print_summary(self):
-        """Print a formatted summary of stored results."""
-        summary = self.get_summary()
-
-        print("\n" + "="*60)
-        print("RESULTS SUMMARY")
-        print("="*60)
-        print(f"Total images analyzed: {summary['total_images']}")
-        print(f"Total particles detected: {summary['total_particles']}")
-
-        if summary['total_images'] > 0:
-            print(f"Average particles per image: {summary['avg_particles_per_image']:.1f}")
-            print(f"Min particles in an image: {summary['min_particles']}")
-            print(f"Max particles in an image: {summary['max_particles']}")
-
-        print("="*60 + "\n")
-
-    def clear_all(self):
-        """
-        Clear all results and reset the CSV file.
-
-        Returns:
-            bool: True if successful
-        """
-        self._create_csv()
-        self.results_df = self._load_data()
-        print("Cleared all results")
-        return True
 
     def __repr__(self):
         """String representation of the manager."""

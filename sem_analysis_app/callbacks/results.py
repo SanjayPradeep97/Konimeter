@@ -10,9 +10,8 @@ import gradio as gr
 import numpy as np
 
 from sem_particle_analysis import __version__ as KONIMETER_VERSION
-from sem_particle_analysis.cli import sha256_file
 from sem_particle_analysis.data_manager import parse_measurement_list
-from sem_particle_analysis.dataset import DIRNAME, TrainingSet, instance_labels
+from sem_particle_analysis.dataset import DIRNAME, TrainingSet, instance_labels, sha256_file
 
 from ..state import state
 from .gallery import create_image_gallery

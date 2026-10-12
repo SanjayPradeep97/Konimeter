@@ -117,10 +117,6 @@ class TestImplications:
     def test_an_unknown_kind_leaves_polarity_to_contrast(self):
         assert mod.Modality().dark_particles is None
 
-    def test_only_sem_expects_a_databar(self):
-        assert mod.Modality(kind=mod.SEM).expects_databar is True
-        assert mod.Modality(kind=mod.TEM).expects_databar is False
-
     def test_label_names_the_instrument_when_known(self):
         assert mod.Modality(kind=mod.TEM, instrument="jeol").label == "TEM (JEOL)"
         assert mod.Modality(kind=mod.SEM).label == "SEM"

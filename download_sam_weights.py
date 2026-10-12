@@ -2,15 +2,15 @@
 """
 Download SAM Model Weights
 
-Downloads the Segment Anything Model (SAM) weights from Meta AI's repository.
-Weights are saved to the sam_weights/ directory next to this script.
+The app offers to download ViT-B itself, on its Setup tab. This script does the
+same from a terminal, for scripts and installers, and fetches the larger models
+too. Weights go to the same place either way: sam_weights/ in this folder, or
+the directory named by SAM_WEIGHTS_DIR.
 
 Available models:
-- ViT-H (vit_h): Best quality, largest model (2.4 GB)
+- ViT-B (vit_b): Fastest, smallest model (358 MB); what the app loads first
 - ViT-L (vit_l): Good balance of quality and speed (1.2 GB)
-- ViT-B (vit_b): Fastest, smallest model (358 MB)
-
-Non-interactive use, for scripts and installers:
+- ViT-H (vit_h): Best quality, largest model (2.4 GB)
 
     python download_sam_weights.py --model vit_b
     python download_sam_weights.py --model vit_b vit_h
@@ -20,68 +20,28 @@ With no arguments an interactive menu is shown.
 
 import argparse
 import sys
-import urllib.request
-from pathlib import Path
 
-# Model download URLs
-MODELS = {
-    "vit_h": {
-        "url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth",
-        "filename": "sam_vit_h_4b8939.pth",
-        "size": "2.4 GB",
-    },
-    "vit_l": {
-        "url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
-        "filename": "sam_vit_l_0b3195.pth",
-        "size": "1.2 GB",
-    },
-    "vit_b": {
-        "url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
-        "filename": "sam_vit_b_01ec64.pth",
-        "size": "358 MB",
-    },
-}
+from sem_particle_analysis.model import weights_dir
+from sem_particle_analysis.weights import MODELS, download
 
 
-def download_file(url, destination):
-    """Download `url` to `destination` with a progress bar, via a .part file so
-    an interrupted download never leaves a truncated checkpoint behind."""
-    destination = Path(destination)
-    tmp = destination.with_suffix(destination.suffix + ".part")
-    print(f"Downloading to: {destination}")
-
-    def progress_hook(block_num, block_size, total_size):
-        downloaded = block_num * block_size
-        if total_size > 0:
-            percent = min(downloaded / total_size * 100, 100)
-            bar_length = 50
-            filled = int(bar_length * percent / 100)
-            bar = "=" * filled + "-" * (bar_length - filled)
-            mb_downloaded = downloaded / (1024 * 1024)
-            mb_total = total_size / (1024 * 1024)
-            print(f"\r[{bar}] {percent:.1f}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)",
-                  end="", flush=True)
-
-    try:
-        urllib.request.urlretrieve(url, tmp, progress_hook)
-    except BaseException:
-        if tmp.exists():
-            tmp.unlink()
-        raise
-    print()  # New line after progress bar
-    tmp.replace(destination)
+def print_progress(done, total):
+    if total > 0:
+        percent = 100 * done / total
+        filled = int(percent / 2)
+        print(f"\r[{'=' * filled}{'-' * (50 - filled)}] {percent:.1f}% "
+              f"({done / 2**20:.1f}/{total / 2**20:.1f} MB)", end="", flush=True)
 
 
 def choose_interactively():
     print("\nWhich model(s) would you like to download?")
-    print("  1. ViT-H (best quality, 2.4 GB)")
+    print("  1. ViT-B (fastest, 358 MB; what the app loads first, recommended)")
     print("  2. ViT-L (1.2 GB)")
-    print("  3. ViT-B (fastest, 358 MB; what the app loads first, recommended)")
+    print("  3. ViT-H (best quality, 2.4 GB)")
     print("  4. All models")
-    print("  5. ViT-H and ViT-B")
-    choice = input("\nEnter choice (1-5): ").strip()
-    return {"1": ["vit_h"], "2": ["vit_l"], "3": ["vit_b"],
-            "4": ["vit_h", "vit_l", "vit_b"], "5": ["vit_h", "vit_b"]}.get(choice, [])
+    choice = input("\nEnter choice (1-4): ").strip()
+    return {"1": ["vit_b"], "2": ["vit_l"], "3": ["vit_h"],
+            "4": ["vit_b", "vit_l", "vit_h"]}.get(choice, [])
 
 
 def main(argv=None):
@@ -90,42 +50,29 @@ def main(argv=None):
                     help="checkpoint(s) to download without asking, e.g. --model vit_b")
     args = ap.parse_args(argv)
 
-    weights_dir = Path(__file__).resolve().parent / "sam_weights"
-    weights_dir.mkdir(exist_ok=True)
-
-    print("SAM Model Weights Downloader")
-    print("=" * 60)
-    print("\nAvailable models:")
-    for key, model in MODELS.items():
-        print(f"  {key}: {model['filename']} ({model['size']})")
-
-    models_to_download = list(args.model) if args.model else choose_interactively()
-    if not models_to_download:
+    models = list(args.model) if args.model else choose_interactively()
+    if not models:
         print("Invalid choice. Exiting.")
         return 1
 
-    print(f"\nDownloading {len(models_to_download)} model(s)...")
     failed = []
-    for model_key in models_to_download:
-        model = MODELS[model_key]
-        destination = weights_dir / model["filename"]
-        if destination.exists():
-            print(f"\n{model['filename']} already exists. Skipping.")
+    for model_type in models:
+        model = MODELS[model_type]
+        if (weights_dir() / model["filename"]).exists():
+            print(f"{model['filename']} already exists. Skipping.")
             continue
-        print(f"\nDownloading {model['filename']} ({model['size']})...")
+        print(f"Downloading {model['filename']} ({model['size']})...")
         try:
-            download_file(model["url"], destination)
-            print("Downloaded successfully.")
-        except Exception as e:
-            print(f"Error downloading {model['filename']}: {e}")
-            failed.append(model_key)
+            download(model_type, progress=print_progress)
+            print()
+        except Exception as problem:
+            print(f"\nError downloading {model['filename']}: {problem}")
+            failed.append(model_type)
 
-    print("\n" + "=" * 60)
     if failed:
         print(f"FAILED: {', '.join(failed)} (check the connection and re-run)")
         return 1
-    print("Download complete!")
-    print(f"Weights saved to: {weights_dir}")
+    print(f"Weights are in {weights_dir()}")
     return 0
 
 

@@ -9,7 +9,7 @@ repository, so nothing has to be downloaded except the SAM checkpoint.
 
 It is deliberately not the full analysis application (that is
 [`sem_analysis_app/`](../docs/SEGMENTATION_TOOL.md)): no scale bars, no
-measurement, no batch mode. Just click, mask, label.
+measurement, no results file. Just click, mask, label.
 
 ## Start it
 

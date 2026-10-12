@@ -60,6 +60,3 @@ results/smoke/
 yolo*.pt
 *.part
 demo/images/**/*.tif
-
-# Default output folder of konimeter-batch, when run from the repository root.
-/analysis_output/

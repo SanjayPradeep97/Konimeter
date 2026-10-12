@@ -1,7 +1,10 @@
 """Gradio callbacks, grouped by the tab they serve."""
 
 from .setup import (
+    CHECKPOINTS_FOUND,
+    CHECKPOINTS_MISSING,
     current_save_dataset,
+    download_model,
     initialize_sam,
     load_images_from_folder,
     set_save_dataset,
@@ -79,6 +82,7 @@ __all__ = [
     "create_image_gallery",
     "current_save_dataset",
     "delete_result_row",
+    "download_model",
     "export_results",
     "frame_header",
     "frame_summary",

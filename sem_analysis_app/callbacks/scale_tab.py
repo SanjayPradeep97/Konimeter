@@ -351,7 +351,7 @@ def prepare_scale_tab():
                 _status_lines(), "", frame_summary())
 
     try:
-        calibration = sc.from_metadata(_detector(), state.current_image, path)
+        calibration = sc.from_metadata(_detector(), path)
     except sc.ScaleError as exc:
         tier1 = f"❌ Tier 1 — no pixel size in the file ({exc})."
         return _try_automatic_bar(payload, tier1)

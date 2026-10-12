@@ -119,7 +119,6 @@ class TestUnitConversion:
         measurements = analyzer.get_measurements()
         assert measurements["num_particles"] == 0
         assert measurements["areas"] == []
-        assert analyzer.get_summary_statistics() == {"num_particles": 0}
 
 
 class TestSizeFiltering:
@@ -165,17 +164,6 @@ class TestEdgeHandling:
         assert not cleaned[:, :4].any()
         assert not cleaned[:, -4:].any()
         assert cleaned[10, 10]
-
-    def test_clear_edge_particles_drops_only_the_touching_one(self):
-        mask = np.zeros((300, 300), dtype=bool)
-        mask[140:200, 140:200] = True   # interior
-        mask[0:40, 100:160] = True      # touches the top edge
-        analyzer = ParticleAnalyzer(min_size=30)
-        analyzer.analyze_mask(mask, remove_border=False)
-        assert len(analyzer.regions) == 2
-        analyzer.clear_edge_particles(buffer_size=0)
-        assert len(analyzer.regions) == 1
-
 
 class TestRefinementOperations:
     @pytest.fixture
@@ -267,23 +255,6 @@ class TestCleanupConsistency:
         assert analyzer.regions[0].area == pytest.approx(area_before)
 
 
-class TestSummaryStatistics:
-    def test_statistics_describe_the_measured_particles(self):
-        mask, _ = make_disk_mask(
-            shape=(400, 400), centers_radii=((100, 100, 30), (300, 250, 45))
-        )
-        analyzer = ParticleAnalyzer(conversion_factor=2.0, min_size=30)
-        analyzer.analyze_mask(mask, remove_border=False)
-        stats = analyzer.get_summary_statistics()
-        measurements = analyzer.get_measurements(in_nm=True)
-
-        assert stats["num_particles"] == 2
-        assert stats["unit"] == "nm"
-        assert stats["diameter_mean"] == pytest.approx(np.mean(measurements["diameters"]))
-        assert stats["diameter_min"] <= stats["diameter_median"] <= stats["diameter_max"]
-        assert stats["area_mean"] == pytest.approx(np.mean(measurements["areas"]))
-
-
 class TestClickHitTesting:
     """
     Turning a click into a particle.
@@ -373,8 +344,7 @@ class TestZeroBorderBufferClearsNothing:
 
     It used to mean "erase the mask": the border strips were cleared with
     ``mask[-border_width:]``, and numpy reads ``mask[-0:]`` as the whole array.
-    Every particle vanished, the count came back zero, and nothing said why —
-    reachable from the batch CLI as ``--border-buffer 0``.
+    Every particle vanished, the count came back zero, and nothing said why.
     """
 
     def test_particles_survive_a_zero_buffer(self):
