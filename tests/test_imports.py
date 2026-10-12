@@ -85,9 +85,8 @@ class TestOptionalDependenciesStayOptional:
 
 class TestOCRUnavailableError:
     def test_is_a_value_error_so_auto_mode_still_falls_back(self):
-        # detect_scale(method='auto') catches ValueError around the OCR attempt
-        # and falls through to metadata. A missing library must take that path
-        # rather than crashing the run.
+        # Callers catch ValueError around an OCR attempt and move on to the next
+        # tier. A missing library must take that path rather than crashing.
         from sem_particle_analysis import OCRUnavailableError
 
         assert issubclass(OCRUnavailableError, ValueError)

@@ -56,11 +56,6 @@ class Modality:
         return _DARK_PARTICLES.get(self.kind)
 
     @property
-    def expects_databar(self):
-        """Whether a strip below the micrograph is expected for this kind."""
-        return self.kind == SEM
-
-    @property
     def label(self):
         maker = f" ({self.instrument.upper()})" if self.instrument else ""
         return f"{self.kind}{maker}"

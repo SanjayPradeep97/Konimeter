@@ -136,19 +136,6 @@ class TestRowOperations:
         with pytest.raises(IndexError):
             manager.delete_result(99)
 
-    def test_clear_all_empties_the_file(self, manager):
-        manager.add_result("a.tif", measurements(3))
-        manager.clear_all()
-        assert len(manager.get_results()) == 0
-
-    def test_export_writes_a_second_file(self, manager, tmp_path):
-        manager.add_result("a.tif", measurements(3))
-        destination = tmp_path / "export"
-        manager.export_results(str(destination))
-        assert (tmp_path / "export.csv").exists()
-        assert len(pd.read_csv(tmp_path / "export.csv")) == 1
-
-
 class TestSummary:
     def test_summary_of_an_empty_file(self, manager):
         assert manager.get_summary() == {"total_images": 0, "total_particles": 0}

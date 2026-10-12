@@ -3,10 +3,10 @@
 [![tests](https://github.com/SanjayPradeep97/Konimeter/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/SanjayPradeep97/Konimeter/actions/workflows/tests.yml)
 
 Segment, count and measure particles in SEM and TEM micrographs with Meta's
-[Segment Anything Model](https://segment-anything.com/) (SAM): a web app for
-interactive analysis, and a command-line tool for running the same pipeline over
-a folder. It has been used for carbon nanotubes, microplastics and wildfire
-particulate matter, and works for anything else that can be imaged as particles.
+[Segment Anything Model](https://segment-anything.com/) (SAM), in an app that
+runs in your browser: SAM proposes the particles, and you check and correct them.
+It has been used for carbon nanotubes, microplastics and wildfire particulate
+matter, and works for anything else that can be imaged as particles.
 
 For every image you get a particle count and, per particle, the area and the
 equivalent circular diameter, in pixels and in nanometres.
@@ -141,8 +141,7 @@ the file:
 | Scale bar | in the databar | burned into the frame, so its patch is excluded from measurement |
 | Particles are | **brighter** than the substrate | **darker** than the support film |
 
-Both decisions are shown on the Scale & Frame tab and can be overridden there, or
-with `--modality` and `--particles` in batch mode.
+Both decisions are shown on the Scale & Frame tab and can be overridden there.
 
 Micrographs often contain large areas that are not specimen — the black corners
 left by a circular aperture, a grid bar blocking the beam, a burned-in scale bar.
@@ -152,48 +151,6 @@ measured. The share excluded is shown on the Scale & Frame tab.
 Prefer **original TIFFs straight from the microscope**: once an image has been
 converted to PNG or JPEG, or cropped in another tool, its pixel-size metadata is
 gone and scale has to come from the printed bar or from a hand measurement.
-
----
-
-## Batch analysis
-
-The same pipeline without the interface, for a whole folder. Every run writes a
-`run.json` recording the image hashes, model and checkpoint hash, the scale and
-how it was obtained, all parameters, library versions and the git revision, so a
-result can be traced back to exactly what produced it.
-
-```bash
-konimeter-batch path/to/images -o path/to/output --clear-edges
-```
-
-Outputs: `particles.csv` (one row per particle), `per_image_summary.csv`,
-`size_distribution.png/.pdf` at 300 dpi, and `run.json`. When some frames had no
-readable scale and were measured in pixels, there is one distribution per unit
-(`size_distribution_nm.*`, `size_distribution_pixels.*`) rather than one that
-mixes the two.
-
-| Flag | Effect |
-| --- | --- |
-| `-o DIR` | Where the outputs go (default `analysis_output/`) |
-| `--checkpoint PATH` | Use this weights file instead of looking in `sam_weights/` |
-| `--model-type vit_b\|vit_l\|vit_h` | The SAM architecture. Default: read from the checkpoint's name, else the ViT-B weights in `sam_weights/`, as in the app |
-| `--device cpu\|mps\|cuda` | Force a device (default: the GPU if there is one) |
-| `--scale-nm-per-px X` | Fix the scale instead of establishing it per image |
-| `--scale-method metadata\|ocr\|auto` | How to establish scale (default `auto`) |
-| `--clear-edges` | Drop particles touching the frame; they are only partly imaged |
-| `--min-size N` | Ignore particles below N pixels (default 30) |
-| `--border-buffer N` | Clear an N-pixel strip along the frame edge before measuring (default 4) |
-| `--crop-percent P` | Override databar removal (default: measure it) |
-| `--modality SEM\|TEM` | Force the instrument kind (default: read it from the file) |
-| `--particles bright\|dark` | Force particle polarity (default: follow the modality) |
-| `--max-nm-per-px X` | Skip frames coarser than this — magnifications too low to resolve particles |
-| `--min-nm-per-px X` | Skip frames finer than this |
-| `--no-plots` | Write the CSVs and `run.json` only |
-| `--no-checkpoint-hash` | Don't hash the weights file into `run.json` (saves a few seconds) |
-
-Batch mode is the automatic pipeline only, with no interactive correction, and
-picks its mask candidate by heuristic; the chosen mask and the rejected candidates
-are recorded in `run.json`. Check its output before relying on the counts.
 
 ---
 
@@ -266,18 +223,13 @@ Measurements are checked against shapes of exactly known size —
 particle mask are all ground truth — so a regression shows up as a wrong number
 rather than merely a changed one.
 
-Importing `sem_particle_analysis` pulls in neither EasyOCR nor Gradio: without
-EasyOCR, scale from metadata or by hand still works, and the library and
-`konimeter-batch` do not need Gradio. (`sem-analyze`, the batch command's
-earlier name, still works.)
-
 ---
 
 ## Layout
 
 ```
 sem_analysis_app/        the web app (konimeter, or python -m sem_analysis_app)
-sem_particle_analysis/   the library and the konimeter-batch command
+sem_particle_analysis/   the segmentation and measurement library the app is built on
 tests/                   the test suite
 download_sam_weights.py  fetches SAM checkpoints into sam_weights/
 run_app.bat              Windows launcher (scripts/activate_env.bat finds conda)

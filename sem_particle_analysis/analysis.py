@@ -6,7 +6,6 @@ Analyzes segmented particles and calculates size measurements.
 
 import numpy as np
 from skimage import measure, morphology
-from skimage.segmentation import clear_border
 
 from ._compat import binary_closing, binary_opening, remove_objects_smaller_than
 
@@ -53,15 +52,6 @@ class ParticleAnalyzer:
         self.regions = []
         # Set by merge_particles: closing can fail to join distant particles.
         self.last_merge_succeeded = True
-
-    def set_conversion_factor(self, conversion_factor):
-        """
-        Set or update the pixel-to-nanometer conversion factor.
-
-        Args:
-            conversion_factor (float): nm/pixel conversion
-        """
-        self.conversion = conversion_factor
 
     @staticmethod
     def _clean_mask(mask, min_size):
@@ -222,33 +212,6 @@ class ParticleAnalyzer:
             if in_band[pixels].mean() >= fraction:
                 cleaned[pixels] = False
         return cleaned
-
-    def clear_edge_particles(self, buffer_size=0):
-        """
-        Remove particles touching the image edges.
-
-        Args:
-            buffer_size (int): Buffer distance from edge (pixels)
-
-        Returns:
-            int: Number of particles removed
-        """
-        if self.mask is None:
-            raise RuntimeError("No mask to process. Run analyze_mask() first.")
-
-        n_before = len(self.regions)
-
-        # Clear border-touching components
-        cleaned = clear_border(self.mask.astype(bool), buffer_size=buffer_size)
-        self.mask = cleaned.astype(bool)
-
-        # Relabel with filtering to prevent fake particles
-        self._relabel_and_filter()
-
-        n_removed = max(0, n_before - len(self.regions))
-        print(f"Removed {n_removed} edge-touching particles")
-
-        return n_removed
 
     def get_measurements(self, in_nm=True):
         """
@@ -487,32 +450,3 @@ class ParticleAnalyzer:
         index, region = by_label[best[1]]
         return region, index, region.label
 
-    def get_summary_statistics(self):
-        """
-        Calculate summary statistics for all particles.
-
-        Returns:
-            dict: Statistics including mean, median, std, min, max for areas and diameters
-        """
-        measurements = self.get_measurements(in_nm=bool(self.conversion))
-
-        if measurements['num_particles'] == 0:
-            return {'num_particles': 0}
-
-        areas = np.array(measurements['areas'])
-        diameters = np.array(measurements['diameters'])
-
-        return {
-            'num_particles': measurements['num_particles'],
-            'unit': measurements['unit'],
-            'area_mean': float(np.mean(areas)),
-            'area_median': float(np.median(areas)),
-            'area_std': float(np.std(areas)),
-            'area_min': float(np.min(areas)),
-            'area_max': float(np.max(areas)),
-            'diameter_mean': float(np.mean(diameters)),
-            'diameter_median': float(np.median(diameters)),
-            'diameter_std': float(np.std(diameters)),
-            'diameter_min': float(np.min(diameters)),
-            'diameter_max': float(np.max(diameters))
-        }

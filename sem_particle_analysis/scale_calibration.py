@@ -141,7 +141,7 @@ def format_length(nanometres):
     return f"{nanometres:g} nm"
 
 
-def from_metadata(detector, image, file_path):
+def from_metadata(detector, file_path):
     """
     Tier 1: read the pixel size the instrument recorded in the file.
 
@@ -149,7 +149,7 @@ def from_metadata(detector, image, file_path):
         ScaleError: If the file carries no usable pixel size.
     """
     try:
-        result = detector.detect_scale(image, file_path=str(file_path), method="metadata")
+        result = detector.detect_scale_from_metadata(str(file_path))
     except Exception as exc:
         raise ScaleError(str(exc)) from exc
 

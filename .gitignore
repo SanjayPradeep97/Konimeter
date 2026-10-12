@@ -50,6 +50,3 @@ konimeter_dataset/
 # Gradio cache
 gradio_cached_examples/
 flagged/
-
-# Default output folder of konimeter-batch, when run from the repository root.
-/analysis_output/

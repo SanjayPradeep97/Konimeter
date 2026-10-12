@@ -41,9 +41,9 @@ def remove_objects_smaller_than(mask, min_size):
     Drop connected components whose area is strictly below ``min_size``.
 
     A component of area exactly ``min_size`` is **kept**. That is what the rest
-    of the pipeline promises — ``analyze_mask`` filters with ``area >= min_size``
-    and ``konimeter-batch --min-size N`` is documented as ignoring particles *below*
-    N — but it is not what the library does any more.
+    of the pipeline promises — ``analyze_mask`` filters with ``area >= min_size``,
+    and the app's "Smallest particle" setting is documented as ignoring particles
+    *below* N — but it is not what the library does any more.
 
     ``remove_small_objects(min_size=N)`` was documented as removing components
     smaller than N. In scikit-image 0.26 the parameter is deprecated in favour of

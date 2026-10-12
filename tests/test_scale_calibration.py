@@ -143,19 +143,19 @@ class TestScaleCalibration:
 class TestFromMetadataErrors:
     def test_raises_scale_error_when_detector_finds_nothing(self):
         class NoScale:
-            def detect_scale(self, *args, **kwargs):
+            def detect_scale_from_metadata(self, file_path):
                 return {}
 
         with pytest.raises(sc.ScaleError):
-            sc.from_metadata(NoScale(), None, "image.tif")
+            sc.from_metadata(NoScale(), "image.tif")
 
     def test_wraps_detector_exceptions(self):
         class Broken:
-            def detect_scale(self, *args, **kwargs):
+            def detect_scale_from_metadata(self, file_path):
                 raise RuntimeError("no metadata")
 
         with pytest.raises(sc.ScaleError):
-            sc.from_metadata(Broken(), None, "image.tif")
+            sc.from_metadata(Broken(), "image.tif")
 
 
 class TestNormaliseBox:

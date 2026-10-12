@@ -27,7 +27,7 @@ def component_of_area(area, shape=(60, 60)):
 
 class TestRemoveObjectsSmallerThan:
     def test_keeps_a_component_of_exactly_min_size(self):
-        # The documented contract: --min-size N ignores particles *below* N.
+        # The documented contract: a smallest particle of N ignores those *below* N.
         mask = component_of_area(30)
         assert _compat.remove_objects_smaller_than(mask, 30).sum() == 30
 
@@ -116,7 +116,6 @@ class TestAnalyzerAgreesWithItsOwnSizeFilter:
             analyzer.analyze_mask(mask, remove_border=True)
             analyzer.merge_particles([r.label for r in analyzer.regions])
             analyzer.get_measurements(in_nm=True)
-            analyzer.get_summary_statistics()
 
         offenders = [f"{w.category.__name__}: {w.message}" for w in caught
                      if issubclass(w.category, (DeprecationWarning, FutureWarning))]

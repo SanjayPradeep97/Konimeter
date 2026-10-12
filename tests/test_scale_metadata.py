@@ -12,7 +12,10 @@ import pytest
 
 tifffile = pytest.importorskip("tifffile")
 
+from PIL import Image
+
 from sem_particle_analysis import ScaleDetector
+from sem_particle_analysis import scale_calibration as sc
 
 
 @pytest.fixture(scope="module")
@@ -134,28 +137,29 @@ class TestValidationBounds:
         assert detector._validate_pixel_size(high * 2)[1] == "invalid"
 
 
-class TestDetectScaleDispatch:
-    def test_metadata_mode_returns_the_metadata_result(self, detector, tmp_path):
+class TestTierOne:
+    """What the Scale tab's first tier gets back from a file."""
+
+    def test_a_recorded_pixel_size_is_the_scale(self, detector, tmp_path):
         path = write_tiff(tmp_path / "fei.tif", description="[Scan]\nPixelWidth=2.5e-9\n")
-        image = np.zeros((64, 64, 3), dtype=np.uint8)
-        result = detector.detect_scale(image, file_path=str(path), method="metadata")
-        assert result["method"] == "metadata"
-        assert result["conversion"] == pytest.approx(2.5)
+        calibration = sc.from_metadata(detector, path)
+        assert calibration.method == "metadata"
+        assert calibration.nm_per_px == pytest.approx(2.5)
 
-    def test_metadata_mode_raises_rather_than_falling_back(self, detector, tmp_path):
+    def test_a_tiff_without_one_is_refused(self, detector, tmp_path):
         path = write_tiff(tmp_path / "bare.tif", description="nothing useful")
-        image = np.zeros((64, 64, 3), dtype=np.uint8)
-        with pytest.raises(ValueError):
-            detector.detect_scale(image, file_path=str(path), method="metadata")
+        with pytest.raises(sc.ScaleError):
+            sc.from_metadata(detector, path)
 
-    def test_auto_mode_prefers_metadata_without_needing_ocr(self, detector, tmp_path,
-                                                             monkeypatch):
-        # With EasyOCR absent, auto mode must still succeed off metadata rather
-        # than dying on the import. Made absent here, so that the test neither
-        # depends on the install nor downloads OCR models where it is installed.
+    def test_a_png_is_refused_with_the_reason(self, detector, tmp_path):
+        path = tmp_path / "frame.png"
+        Image.fromarray(np.zeros((8, 8), dtype=np.uint8)).save(path)
+        with pytest.raises(sc.ScaleError, match="only TIFF files record a pixel size"):
+            sc.from_metadata(detector, path)
+
+    def test_no_ocr_is_needed(self, detector, tmp_path, monkeypatch):
+        # Metadata must work where EasyOCR is not installed, and must not
+        # download OCR models where it is.
         monkeypatch.setitem(sys.modules, "easyocr", None)
         path = write_tiff(tmp_path / "fei.tif", description="[Scan]\nPixelWidth=2.5e-9\n")
-        image = np.zeros((64, 64, 3), dtype=np.uint8)
-        result = detector.detect_scale(image, file_path=str(path), method="auto")
-        assert result["conversion"] == pytest.approx(2.5)
-        assert result["method"] == "metadata"
+        assert sc.from_metadata(detector, path).nm_per_px == pytest.approx(2.5)

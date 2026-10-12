@@ -123,38 +123,34 @@ class TestBurnedInBar:
         assert not scale_detector.detect_scale_bar_anywhere(image).get("warning")
 
 
-class TestAutoModeSearchesEverywhere:
+class TestTheAutomaticReadSearchesEverywhere:
     """
-    ``detect_scale`` is what batch runs use. Its OCR fallback used to look only
-    in the bottom-right, which suits an SEM databar and misses a TEM bar burned
-    into the bottom-left completely — so every TEM frame in a batch fell back to
-    pixel units while the web app, which already swept, read the same files fine.
+    When a file has no pixel size, the Scale tab reads the printed bar with
+    ``detect_scale_bar_anywhere``. Looking only in the bottom-right suits an SEM
+    databar and misses a TEM bar burned into the bottom-left completely.
     """
 
-    def test_auto_finds_a_bottom_left_bar(self, scale_detector):
+    def test_it_finds_a_bottom_left_bar(self, scale_detector):
         image, truth = make_burnin_micrograph(bar_length_px=128, scale_text="1 um",
                                               scale_nm=1000.0)
-        result = scale_detector.detect_scale(image, method="auto")
-        assert result["method"] == "ocr"
+        result = scale_detector.detect_scale_bar_anywhere(image)
         assert result["conversion"] == pytest.approx(truth["nm_per_px"], rel=0.06)
 
-    def test_ocr_mode_finds_a_bottom_left_bar(self, scale_detector):
+    def test_it_finds_a_smaller_bottom_left_bar(self, scale_detector):
         image, truth = make_burnin_micrograph(bar_length_px=104, scale_text="0.5 um",
                                               scale_nm=500.0)
-        result = scale_detector.detect_scale(image, method="ocr")
+        result = scale_detector.detect_scale_bar_anywhere(image)
         assert result["conversion"] == pytest.approx(truth["nm_per_px"], rel=0.08)
 
-    def test_auto_still_finds_a_databar_bar(self, scale_detector):
-        # The sweep must not cost the case the old default was chosen for.
+    def test_it_still_finds_a_databar_bar(self, scale_detector):
         image, truth = make_micrograph(bar_length_px=200, scale_text="500 nm",
                                        scale_nm=500.0, bar_left=620)
-        result = scale_detector.detect_scale(image, method="ocr")
+        result = scale_detector.detect_scale_bar_anywhere(image)
         assert result["conversion"] == pytest.approx(truth["nm_per_px"], rel=0.08)
 
-    def test_a_named_region_still_restricts_the_search(self, scale_detector):
-        # Passing a region explicitly means "look here", not "look here first".
+    def test_a_box_restricts_the_search_to_the_box(self, scale_detector):
+        # The box drawn on the Scale tab means "look here", not "look here first".
         image, _ = make_burnin_micrograph(bar_length_px=128)
         with pytest.raises(ValueError):
-            scale_detector.detect_scale(
-                image, method="ocr",
-                region_x=0.75, region_y=0.5, region_width=0.3, region_height=0.1)
+            scale_detector.detect_scale_bar(
+                image, region_x=0.75, region_y=0.5, region_width=0.3, region_height=0.1)

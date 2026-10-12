@@ -47,9 +47,6 @@ dependencies = [
 
 [project.scripts]
 konimeter = "sem_analysis_app.__main__:main"
-konimeter-batch = "sem_particle_analysis.cli:main"
-# The batch command's name before the rename, kept so existing scripts still run.
-sem-analyze = "sem_particle_analysis.cli:main"
 
 [project.optional-dependencies]
 dev = [

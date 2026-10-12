@@ -27,6 +27,7 @@ both.
 """
 
 import csv
+import hashlib
 import os
 from pathlib import Path
 
@@ -59,6 +60,15 @@ analyst.
 
 A frame saved again replaced its files and its row.
 """
+
+
+def sha256_file(path, chunk_size=1 << 20):
+    """SHA-256 of a file, read in chunks so large TIFFs don't fill memory."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(chunk_size), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def instance_labels(regions, shape):

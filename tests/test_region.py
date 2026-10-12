@@ -99,16 +99,13 @@ class TestAnalysableRegion:
         blocked = np.zeros(image.shape[:2], dtype=bool)
         blocked[0:50, :] = True
         region, info = reg.analysable_region(image, blocked=blocked)
-        # Recorded rounded, for a readable provenance file.
+        # Recorded rounded, for display.
         assert info["blocked_fraction"] == pytest.approx(blocked.mean(), abs=1e-5)
         assert not region[10, 10]
 
-    def test_info_is_json_friendly(self):
-        import json
-
+    def test_info_says_what_was_excluded(self):
         image, _ = make_vignetted_frame()
         _region, info = reg.analysable_region(image)
-        json.dumps(info)   # goes straight into run.json
         assert set(info) == {"blocked_fraction", "excluded_boxes", "analysable_fraction"}
 
 
