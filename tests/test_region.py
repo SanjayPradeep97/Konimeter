@@ -65,6 +65,43 @@ class TestBlockedArea:
         assert not blocked[350, 350]
 
 
+class TestParticlesAreNeverExcluded:
+    """
+    On real SEM filters the background is as dark as a grid bar. The first rule
+    filled in every particle sitting on it and grew into their edges, so on
+    dozens of the 286 test images real particles were left out of analysis.
+    """
+
+    def filter_frame(self):
+        rng = np.random.default_rng(3)
+        image = rng.normal(6, 3, size=(400, 400)).clip(0, 255)
+        particles = np.zeros((400, 400), dtype=bool)
+        yy, xx = np.mgrid[0:400, 0:400]
+        for cy, cx, r in ((100, 100, 30), (250, 300, 45), (330, 90, 12)):
+            particles |= (yy - cy) ** 2 + (xx - cx) ** 2 <= r ** 2
+        image[particles] = 220
+        return image.astype(np.uint8), particles
+
+    def test_a_bright_particle_on_dark_background_is_kept(self):
+        image, particles = self.filter_frame()
+        blocked = reg.blocked_area(image)
+        assert not (blocked & particles).any()
+
+    def test_the_particle_edges_are_not_eaten_into(self):
+        # The margin grows the region into dark pixels only.
+        image, particles = self.filter_frame()
+        region, _ = reg.analysable_region(image)
+        assert region[particles].all()
+
+    def test_a_textured_dark_object_at_the_edge_is_sample(self):
+        # A dense TEM aggregate running off the frame: dark, large, at the edge,
+        # but textured, which a beam-blocked area never is.
+        rng = np.random.default_rng(4)
+        image = np.full((400, 400), 200.0)
+        image[0:200, 0:220] = rng.normal(25, 18, size=(200, 220))
+        assert not reg.blocked_area(image.clip(0, 255).astype(np.uint8)).any()
+
+
 class TestAnalysableRegion:
     def test_excludes_the_blocked_area(self):
         image, truth = make_vignetted_frame()

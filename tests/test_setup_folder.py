@@ -54,9 +54,9 @@ def sample_folder(tmp_path):
     return folder
 
 
-def load(folder):
-    status, gallery, _tabs = setup_tab.load_images_from_folder(str(folder),
-                                                               progress=no_progress)
+def load(folder, microscope=None):
+    status, gallery, _tabs, _microscope = setup_tab.load_images_from_folder(
+        str(folder), microscope, progress=no_progress)
     return status, gallery
 
 
@@ -83,7 +83,7 @@ class TestWhereResultsGo:
         assert os.path.samefile(state.results_manager.csv_file, expected)
 
     def test_opening_a_folder_goes_to_the_gallery(self, sample_folder):
-        _status, _gallery, tabs = setup_tab.load_images_from_folder(
+        _status, _gallery, tabs, _microscope = setup_tab.load_images_from_folder(
             str(sample_folder), progress=no_progress)
         assert tabs.selected == 1
 
@@ -173,7 +173,7 @@ class TestReconnecting:
 
     def test_without_a_model_load_images_stays_off(self):
         state.sam_model = None
-        *_, load_images = setup_tab.restore_setup()
+        *_, load_images, _scope = setup_tab.restore_setup()
         assert load_images["interactive"] is False
 
     def test_with_a_model_it_is_named_and_images_can_be_loaded(self):
@@ -186,7 +186,47 @@ class TestReconnecting:
             device = Device()
 
         state.sam_model = Model()
-        checkpoints, _download, _load_model, status, load_images = setup_tab.restore_setup()
+        checkpoints, _download, _load_model, status, load_images, _scope = setup_tab.restore_setup()
         assert checkpoints["value"] == "/weights/sam_vit_b_01ec64.pth"
         assert "vit_b" in status
         assert load_images["interactive"] is True
+
+
+class TestTheMicroscope:
+    """Which microscope a folder came from sets whether particles are expected
+    darker (TEM) or brighter (SEM)."""
+
+    def test_the_files_say_when_they_can(self, tmp_path):
+        import tifffile
+
+        for name in ("A_0001.tif", "A_0002.tif"):
+            tifffile.imwrite(str(tmp_path / name), np.zeros((32, 32), np.uint8),
+                             description="NIOSH\rXpixCal=620.66\rUnit=um")
+        status, _ = load(tmp_path)
+        assert state.microscope == "TEM"
+        assert "read from the files" in status
+
+    def test_a_choice_is_kept_and_a_disagreement_is_reported(self, tmp_path):
+        import tifffile
+
+        tifffile.imwrite(str(tmp_path / "A_0001.tif"), np.zeros((32, 32), np.uint8),
+                         description="NIOSH\rXpixCal=620.66\rUnit=um")
+        status, _ = load(tmp_path, microscope="SEM")
+        assert state.microscope == "SEM"
+        assert "the files say TEM" in status
+
+    def test_silent_files_ask_for_a_choice(self, sample_folder):
+        status, _ = load(sample_folder)
+        assert state.microscope is None
+        assert "choose SEM or TEM" in status
+
+    def test_the_choice_sets_which_way_round_particles_are(self):
+        from sem_analysis_app.callbacks.segmentation import _particle_polarity
+
+        state.particle_choice = "auto"
+        for choice, dark in (("TEM", True), ("SEM", False)):
+            setup_tab.set_microscope(choice)
+            assert _particle_polarity() is dark
+        state.particle_choice = "bright"     # an explicit choice still wins
+        setup_tab.set_microscope("TEM")
+        assert _particle_polarity() is False

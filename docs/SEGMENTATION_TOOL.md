@@ -55,7 +55,7 @@ The tabs, in the order they are used:
 
 | Tab | What happens there |
 | --- | --- |
-| ⚙️ Setup | Load the SAM model (the first time, download it with the button there), then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it |
+| ⚙️ Setup | Load the SAM model (the first time, download it with the button there), say whether the images are from an SEM or a TEM, then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it |
 | 🖼️ Gallery | Pick an image. Ticked images already have saved results |
 | 📏 Scale & Frame | Establish the scale (below), and check what the app decided about the instrument and the analysable area |
 | 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include and exclude clicks. Every click and every applied change can be undone. *Particles are* (darker / brighter than the background) sets which candidates come first |
@@ -91,9 +91,9 @@ this one number. Three tiers, tried in order of trustworthiness:
 
 | Tier | Method | When it applies |
 | --- | --- | --- |
-| 1 | Pixel size read from the file's own metadata | Automatic on load. Exact, nothing to check. A pixel size found only in a TIFF's generic resolution tag, usually a print setting, waits to be confirmed |
+| 1 | Pixel size read from the file's own metadata | Automatic on load. Exact, nothing to check. Read from FEI/Thermo, Zeiss, Hitachi and TESCAN TIFFs, AMT TEM cameras, and the `.txt` a JEOL SEM saves beside each image. A TIFF's resolution tag is ignored: programs fill it with a print setting |
 | 2 | Read the printed scale bar inside a box you draw | Runs automatically first; drag the box if it got it wrong |
-| 3 | Click the outer edge of each end of the bar and type its length | When the bar is unreadable. A magnifier follows the cursor so you land exactly on the edge |
+| 3 | Click each end of the bar and type its length: the outer edge of a solid bar, the middle of each end tick of a \|—\| bar | When the bar is unreadable. A magnifier follows the cursor so you land exactly |
 
 Tier 2's box is manipulated directly on the image: drag anywhere to draw one,
 drag a corner to resize, drag the middle to move. Tier 3 shows a 7x loupe with a
@@ -101,7 +101,12 @@ crosshair marking precisely where a click will land.
 
 A tier-2 reading is marked unconfirmed until you press **Confirm scale**; tier 1
 and tier 3 are trusted outright, since neither involves a machine reading a
-glyph. The result is shown as "X nm/px · how it was obtained", and it is what the
+glyph. Tier 2 finds the label first and measures the bar beside it, in the
+label's colour, between the centres of its end ticks where it has them. The value
+it read is shown beside **Confirm scale**: if OCR misread it, type the right one
+and the measured bar is kept; the same misreading of a bar the same length is
+corrected the same way from then on, and every scale confirmed lets later
+images at that magnification through without asking. The result is shown as "X nm/px · how it was obtained", and it is what the
 Segment & Refine tab and the results CSV use. Nothing downstream re-detects scale or
 overrides what you set here.
 
@@ -110,29 +115,28 @@ checkpoint.
 
 ## SEM and TEM in one workflow
 
-SAM proposes outlines for both what stands out dark and what stands out bright,
-and the app has to put the right one first. With small particles that is easy;
-with a large one, the particle and the background around it are equally
-plausible, and only knowing which way round the image is settles it.
+On the Setup tab, say which **Microscope** the folder came from. It tells the app
+which way round the particles are: brighter than the background in SEM, darker in
+TEM bright field. That matters most for a large particle, where the particle and
+the background around it are equally plausible outlines.
 
-That is what **Particles are** on the Segment & Refine tab says: *darker* than
-the background (TEM bright field, the usual case), *brighter* (most SEM images),
-or *Auto*. Auto goes by the file: FEI and JEOL files name the instrument, Zeiss,
-Hitachi and TESCAN files are SEM, and a square frame with no metadata is taken to
-be from a TEM camera. Otherwise Auto puts first whichever side stands out more.
-The choice only orders the candidates; the other side is still offered after
-them. It is kept until you change it, so set it once per folder. For the demo
-images in `demo/images/`, which carry no metadata, set it to *Darker*.
+It is filled in when the files say: FEI, Zeiss, Hitachi and TESCAN TIFFs, JEOL
+TEM files (by the tags JEOL's software writes), the `.txt` a JEOL SEM saves beside
+each image, and AMT TEM cameras; if the choice and the files disagree, the app
+says so. **Particles are** on the Segment & Refine tab overrides it for an unusual
+image. The other side's outlines are always still offered, after. The demo images
+in `demo/images/` carry no metadata: choose TEM for them.
 
 An information strip (databar) below the image, as most SEMs write, is found and
-cut off; it must begin with a sharp edge, so plain shading at the bottom of a
+cut off, including Zeiss's, which sits a few rows above the bottom edge; it must
+begin with a straight, sharp edge, so shading or a grid bar at the bottom of a
 frame is never taken for one. A scale bar burned into the image itself, as on
-most TEMs, is left out of measurement instead.
+most TEMs, is left out of measurement instead: just the bar and its label's line.
 
 `tests/test_demo_benchmark.py` scores SAM's first suggestion against the expert
-masks of the 60 demo images (overlap of at least half counts as right): 41 right
-on Auto and 48 on *Darker*, with the right outline among the three offered for
-52 and 54, and one image with no suggestion at all.
+masks of the 60 demo images (overlap of at least half counts as right): 48 right
+with TEM chosen and about 40 with no microscope chosen, with the right outline
+among the three offered for 54 and 52.
 
 **Analysable region.** Micrographs routinely contain large areas that are not
 specimen: the black corners left by a circular aperture, a specimen grid bar

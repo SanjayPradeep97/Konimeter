@@ -13,9 +13,9 @@ of them backwards is silent rather than loud:
   aperture vignette, a grid bar — out-contrasts the particles.
 * **Analysable area.** What counts as "not sample" differs by instrument.
 
-The kind is read from the metadata the instrument wrote, and falls back to frame
-geometry only when the file says nothing. It is always reported with its
-evidence so a wrong guess is visible and correctable rather than silent.
+The kind is read from what the instrument wrote, in the file or beside it. When
+that says nothing, the analyst's choice of microscope on the Setup tab decides.
+It is always reported with its evidence, so a wrong one is visible.
 """
 
 from dataclasses import dataclass
@@ -41,8 +41,8 @@ class Modality:
         instrument: Manufacturer key when known — 'fei', 'jeol', 'zeiss', ...
         detail: Human-readable justification, shown in the UI and recorded in
             the provenance file.
-        from_metadata: True when the instrument said so itself, rather than the
-            kind being inferred from how the frame looks.
+        from_metadata: True when the instrument said so itself, in the file or
+            the .txt beside it, rather than the analyst choosing it.
     """
 
     kind: str = UNKNOWN
@@ -69,6 +69,9 @@ class Modality:
             "dark_particles": self.dark_particles,
         }
 
+
+# The private tags JEOL's TEM Center software writes into every TIFF it saves.
+JEOL_TEM_CENTER_TAGS = frozenset({65006, 65007, 65009, 65010})
 
 # Manufacturers that only ever make one of the two, so the maker settles the kind.
 _MAKER_KIND = {
@@ -122,6 +125,19 @@ def from_metadata(metadata):
         return Modality(kind=SEM, instrument=maker, from_metadata=True,
                         detail=f"{maker} tag 34118")
 
+    # JEOL's TEM Center software writes a block of numeric private tags and no
+    # text. On the test set they are on every JEOL TEM TIFF (108) and on no SEM
+    # file of any make.
+    if JEOL_TEM_CENTER_TAGS <= {code for code in tags if isinstance(code, int)}:
+        return Modality(kind=TEM, instrument="jeol", from_metadata=True,
+                        detail="JEOL TEM Center tags (65006-65010)")
+
+    # An AMT camera, fitted to many TEMs, writes its calibration as text.
+    description = _text_of(metadata.get("image_description") or "")
+    if "XpixCal=" in description:
+        return Modality(kind=TEM, instrument="amt", from_metadata=True,
+                        detail="AMT TEM camera calibration in the file")
+
     # JEOL write a free-text block naming the imaging mode.
     for code, value in tags.items():
         if not isinstance(code, int) or code < 65000:
@@ -147,48 +163,51 @@ def from_metadata(metadata):
     return Modality(detail="metadata names no instrument")
 
 
-def from_appearance(image):
+def from_sidecar(text):
     """
-    Guess the kind from how the frame looks, for files whose metadata is silent.
+    The kind a JEOL instrument's .txt beside the image states, or UNKNOWN.
+    """
+    from .sidecar import parse_jeol
 
-    Weak evidence, deliberately reported as such. A bare square frame is
-    characteristic of a TEM camera readout; anything else stays unknown rather
-    than being guessed. A databar is not taken as evidence either way: some TEMs
-    write one too, and gradual shading at the bottom of a TEM frame was once
-    mistaken for one, which made the frame "SEM" and its particles "brighter".
+    info = parse_jeol(text)
+    if not info:
+        return Modality(detail="no instrument file beside the image")
+    mode = info.get("column_mode")
+    instrument = (info.get("instrument") or "").upper()
+    if mode in (SEM, TEM):
+        return Modality(kind=mode, instrument="jeol", from_metadata=True,
+                        detail=f"JEOL .txt beside the image: column mode {mode}")
+    if instrument.startswith("JSM"):
+        return Modality(kind=SEM, instrument="jeol", from_metadata=True,
+                        detail=f"JEOL .txt beside the image names a {info['instrument']}")
+    if instrument.startswith("JEM"):
+        return Modality(kind=TEM, instrument="jeol", from_metadata=True,
+                        detail=f"JEOL .txt beside the image names a {info['instrument']}")
+    return Modality(detail="the JEOL .txt beside the image names no column mode")
+
+
+def detect(metadata=None, sidecar=None):
+    """
+    What a file says about the instrument that made it.
+
+    Only what the file states: its own tags, then the .txt a JEOL SEM writes
+    beside it. Files that say nothing are UNKNOWN; the analyst says which
+    microscope the folder came from on the Setup tab, which is quicker and
+    surer than any guess from how a frame looks.
 
     Args:
-        image (np.ndarray): The full frame.
-
-    Returns:
-        Modality: Never ``from_metadata``.
-    """
-    height, width = image.shape[:2]
-    if height == width:
-        return Modality(kind=TEM,
-                        detail=f"square {width}px frame, typical of a TEM camera")
-
-    return Modality(detail="a non-square frame")
-
-
-def detect(image, metadata=None):
-    """
-    Best available reading of a frame's instrument kind.
-
-    Metadata wins; appearance is consulted only when the file says nothing.
+        metadata (dict): As returned by ``utils.extract_tiff_metadata``.
+        sidecar (str): Text of a .txt written beside the image, if any.
 
     Returns:
         Modality
     """
-    stated = from_metadata(metadata)
-    if stated.kind != UNKNOWN:
-        return stated
-
-    guessed = from_appearance(image)
-    if guessed.kind != UNKNOWN:
-        return Modality(kind=guessed.kind, instrument=None,
-                        detail=f"{stated.detail}; inferred from a {guessed.detail}")
-    return Modality(detail=f"{stated.detail}; {guessed.detail}")
+    reasons = []
+    for reading in (from_metadata(metadata), from_sidecar(sidecar)):
+        if reading.kind != UNKNOWN:
+            return reading
+        reasons.append(reading.detail)
+    return Modality(detail="; ".join(reasons))
 
 
 def resolve(name):

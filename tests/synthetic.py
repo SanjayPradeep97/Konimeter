@@ -115,6 +115,99 @@ def make_micrograph(
     return np.array(pil), truth
 
 
+def make_zeiss_frame(width=1024, height=768, strip_top=690, strip_bottom=749,
+                     tick_centres=(40, 116), seed=3):
+    """
+    A Zeiss-style frame: a white data strip framed by black rules, inset a few
+    rows above the bottom edge with micrograph below it, and a "2 µm" bar drawn
+    as |—| whose length is measured between the ticks' centres.
+
+    Returns:
+        tuple: (rgb_image, truth) with ``databar_top``, ``bar_length_px`` (tick
+        centre to centre), ``scale_nm`` and ``nm_per_px``.
+    """
+    rng = np.random.default_rng(seed)
+    frame = np.clip(rng.normal(120, 18, size=(height, width)), 0, 255).astype(np.uint8)
+    frame[strip_top:strip_bottom + 1] = 255
+    frame[strip_top:strip_top + 2] = 0                     # frame rules
+    frame[strip_bottom - 1:strip_bottom + 1] = 0
+    pil = Image.fromarray(frame).convert("RGB")
+    draw = ImageDraw.Draw(pil)
+    font = _load_font(22)
+    black = (0, 0, 0)
+    left, right = tick_centres
+    bar_row = strip_top + 40
+    draw.text((left, strip_top + 8), "2 µm", fill=black, font=font)
+    draw.rectangle([left - 1, bar_row - 1, right + 1, bar_row], fill=black)     # 2 px rule
+    for x in (left, right):
+        draw.rectangle([x - 1, bar_row - 9, x, bar_row + 8], fill=black)         # 2 px ticks
+    draw.text((260, strip_top + 8), "Mag =  10.00 K X", fill=black, font=font)
+    draw.text((520, strip_top + 8), "WD =  9.0 mm", fill=black, font=font)
+    draw.text((420, strip_top + 32), "Date :20 Aug 2024", fill=black, font=font)
+    length = right - left
+    return np.array(pil), {"databar_top": strip_top, "bar_length_px": length,
+                           "scale_nm": 2000.0, "nm_per_px": 2000.0 / length}
+
+
+def make_fei_frame(width=1536, image_height=1024, databar_height=70, bar=(900, 1450),
+                   seed=4):
+    """
+    An FEI-style frame: a dark grey databar below the image, with the "5 µm"
+    label printed in a gap in the middle of the bar, which has end ticks.
+
+    Returns:
+        tuple: (rgb_image, truth) with ``bar_length_px`` (tick centre to centre)
+        and ``scale_nm``.
+    """
+    rng = np.random.default_rng(seed)
+    height = image_height + databar_height
+    frame = np.full((height, width), 45, dtype=np.uint8)
+    frame[:image_height] = np.clip(rng.normal(90, 25, size=(image_height, width)), 0, 255)
+    frame[image_height + 44] = 140                                   # divider line
+    pil = Image.fromarray(frame).convert("RGB")
+    draw = ImageDraw.Draw(pil)
+    font = _load_font(24)
+    white = (235, 235, 235)
+    left, right = bar
+    row = image_height + 20
+    label = "5 µm"
+    text_w = draw.textlength(label, font=font)
+    middle = (left + right) / 2
+    gap0, gap1 = middle - text_w / 2 - 6, middle + text_w / 2 + 6
+    draw.rectangle([left, row, gap0, row + 1], fill=white)
+    draw.rectangle([gap1, row, right, row + 1], fill=white)
+    for x in (left, right):
+        draw.rectangle([x - 1, row - 8, x, row + 9], fill=white)
+    draw.text((middle - text_w / 2, row - 14), label, fill=white, font=font)
+    draw.text((40, image_height + 6), "WD  curr  det  HV", fill=white, font=font)
+    draw.text((middle - 30, image_height + 48), "Teneo", fill=white, font=font)
+    return np.array(pil), {"bar_length_px": right - left, "scale_nm": 5000.0,
+                           "databar_top": image_height}
+
+
+def make_jeol_frame(width=1280, image_height=960, strip_height=64, bar=(1000, 1159),
+                    seed=5):
+    """
+    A JEOL SEM-style frame: a black strip below the image with white text, and
+    the scale bar in the strip's top rows, above its "1µm" label.
+    """
+    rng = np.random.default_rng(seed)
+    height = image_height + strip_height
+    frame = np.zeros((height, width), dtype=np.uint8)
+    frame[:image_height] = np.clip(rng.normal(150, 20, size=(image_height, width)), 0, 255)
+    pil = Image.fromarray(frame).convert("RGB")
+    draw = ImageDraw.Draw(pil)
+    font = _load_font(28)
+    white = (255, 255, 255)
+    left, right = bar
+    draw.rectangle([left, image_height, right, image_height + 5], fill=white)
+    draw.text((left + 40, image_height + 22), "1µm", fill=white, font=font)
+    draw.text((20, image_height + 22), "CSU   SEI   15.0kV   X15,000   WD 15.0mm",
+              fill=white, font=font)
+    return np.array(pil), {"bar_length_px": right - left + 1, "scale_nm": 1000.0,
+                           "databar_top": image_height}
+
+
 def databar_region(truth, width_frac=0.55, x_center=0.30):
     """
     Search-region kwargs covering exactly the databar of a ``make_micrograph``

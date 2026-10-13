@@ -57,7 +57,7 @@ def save_training_frame(filename, measurements, scale_method):
             rows_trimmed=full.shape[0] - image.shape[0] if full is not None else 0,
             nm_per_px=measurements.get("nm_per_px"),
             scale_method=scale_method,
-            modality=state.modality.kind if state.modality is not None else "",
+            modality=state.microscope_kind() or "",
             particles={True: "dark", False: "bright"}.get(_particle_polarity(), "contrast"),
             model=getattr(model, "model_type", ""),
             checkpoint=Path(model.checkpoint).name if model is not None else "",

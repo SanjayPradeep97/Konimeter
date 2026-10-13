@@ -35,7 +35,6 @@ VALID_NM_PER_PX = (0.005, 200_000.0)
 
 METHOD_LABELS = {
     "metadata": "file metadata",
-    "tiff_resolution": "TIFF resolution tag",
     "box_ocr": "scale bar read in box",
     "two_points": "two points clicked on the bar",
     "manual": "entered by hand",
@@ -158,19 +157,6 @@ def from_metadata(detector, file_path):
     if not conversion:
         raise ScaleError("No pixel size in the file metadata")
 
-    if result.get("generic_resolution"):
-        # Usually a print resolution, so not trusted until someone has checked
-        # it against the bar.
-        return ScaleCalibration(
-            nm_per_px=float(conversion),
-            method="tiff_resolution",
-            detail="the TIFF's resolution tag",
-            warning=("Most programs set this tag to a print resolution, not the "
-                     "microscope's pixel size. Check it against the scale bar."),
-            extra={"raw": {k: v for k, v in result.items()
-                           if k in ("manufacturer", "source", "scale_nm")}},
-        )
-
     return ScaleCalibration(
         nm_per_px=float(conversion),
         method="metadata",
@@ -215,8 +201,48 @@ def from_box_ocr(detector, image, box):
         detail=f"read “{result.get('ocr_text', '').strip()}” in the box",
         warning=result.get("warning"),
         extra={"box": [x0, y0, x1, y1],
+               "mark": result.get("mark"),
+               "ocr_text": result.get("ocr_text", ""),
                "line_coords": result.get("line_coords"),
                "polarity": result.get("polarity_used")},
+    )
+
+
+def split_length(nanometres):
+    """A length as (value, unit) the way a scale bar prints it: 2000 -> (2.0, "µm")."""
+    for limit, unit in ((1e6, "mm"), (1e3, "µm")):
+        if nanometres >= limit:
+            return round(nanometres / limit, 6), unit
+    return round(nanometres, 6), "nm"
+
+
+def relabelled(calibration, value, unit):
+    """
+    A bar reading with its printed value corrected by hand.
+
+    The bar's measured length is kept; only the number OCR read off the label
+    is replaced, which is the part it gets wrong ("10 µm" read as "40 Urn").
+
+    Raises:
+        ScaleError: If the value is unusable, or the reading measured no bar.
+    """
+    if not calibration.pixel_length:
+        raise ScaleError("This scale measured no bar, so there is no label to correct.")
+    scale_nm = to_nanometres(value, unit)
+    # What OCR first read, kept across repeated corrections.
+    read = (calibration.extra or {}).get("read_nm") or calibration.scale_nm
+    detail = calibration.detail
+    if read and abs(read - scale_nm) > 1e-9 * scale_nm:
+        detail = f"label read as {format_length(read)}, corrected to {format_length(scale_nm)}"
+    extra = dict(calibration.extra or {}, read_nm=read)
+    return ScaleCalibration(
+        nm_per_px=scale_nm / calibration.pixel_length,
+        method=calibration.method,
+        scale_nm=scale_nm,
+        pixel_length=calibration.pixel_length,
+        detail=detail,
+        confirmed=True,
+        extra=extra,
     )
 
 
@@ -282,6 +308,34 @@ def search_box(calibration):
         x0, y0, width, height = (int(round(float(v))) for v in found)
         return (x0, y0, x0 + max(1, width), y0 + max(1, height))
     return None
+
+
+def printed_area(calibration, shape):
+    """
+    The part of the frame the scale bar and its label occupy, as (x0, y0, w, h),
+    or None. Left out of analysis when the bar is printed on the picture itself.
+
+    The reader records the bar and its label's line exactly; a calibration from
+    two clicked points knows only the bar's ends, so a band round them is used;
+    failing both, the region that was searched.
+    """
+    extra = getattr(calibration, "extra", None) or {}
+    mark = extra.get("mark")
+    if mark is not None and len(mark) == 4:
+        return tuple(int(round(float(v))) for v in mark)
+    points = extra.get("points")
+    if points and len(points) == 2:
+        height, width = shape[:2]
+        (xa, ya), (xb, yb) = points
+        pad_x, pad_y = 0.02 * width, 0.04 * height
+        x0, x1 = min(xa, xb) - pad_x, max(xa, xb) + pad_x
+        y0, y1 = min(ya, yb) - pad_y, max(ya, yb) + pad_y
+        return (int(x0), int(y0), int(x1 - x0), int(y1 - y0))
+    found = search_box(calibration)
+    if found is None:
+        return None
+    x0, y0, x1, y1 = found
+    return (x0, y0, max(1, x1 - x0), max(1, y1 - y0))
 
 
 def measured_span(calibration):

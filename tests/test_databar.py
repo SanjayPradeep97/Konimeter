@@ -14,7 +14,8 @@ import numpy as np
 import pytest
 
 from sem_particle_analysis import ScaleDetector
-from synthetic import make_burnin_micrograph, make_grid_bar_frame, make_micrograph
+from synthetic import (make_burnin_micrograph, make_grid_bar_frame, make_jeol_frame,
+                       make_micrograph, make_zeiss_frame)
 
 
 @pytest.fixture(scope="module")
@@ -159,3 +160,23 @@ class TestCasesFromTheRealInstruments:
         # TEM frames carry the bar inside the image; there is no strip to trim.
         image, _ = make_burnin_micrograph()
         assert detector.detect_databar(image)["has_databar"] is False
+
+
+class TestStripsTheTestSetTurnedUp:
+    """Two databar layouts the detector never found on the 286 test images."""
+
+    def test_an_inset_strip_framed_by_rules(self, detector):
+        # Zeiss: a white strip boxed by black rules, a few rows above the edge,
+        # with micrograph below it. The crop starts at the strip's top rule.
+        image, truth = make_zeiss_frame()
+        found = detector.detect_databar(image)
+        assert found["has_databar"] is True
+        assert image.shape[0] - found["databar_height"] == truth["databar_top"]
+
+    def test_a_strip_with_the_bar_in_its_top_rows(self, detector):
+        # JEOL: the bar crosses the strip's first rows, which made them look like
+        # the ragged top of a grid bar.
+        image, truth = make_jeol_frame()
+        found = detector.detect_databar(image)
+        assert found["has_databar"] is True
+        assert image.shape[0] - found["databar_height"] == truth["databar_top"]

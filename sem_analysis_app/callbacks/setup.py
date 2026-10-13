@@ -152,7 +152,7 @@ def restore_setup():
 
     Returns:
         tuple: (checkpoint list, download button, Load model button, model status,
-        Load images button)
+        Load images button, microscope)
     """
     found = [str(p) for p in discover_checkpoints()]
     loaded = state.sam_model is not None
@@ -168,10 +168,42 @@ def restore_setup():
             gr.update(visible=not found),
             gr.update(variant="primary" if found else "secondary"),
             status,
-            gr.update(interactive=loaded))
+            gr.update(interactive=loaded),
+            gr.update(value=state.microscope))
 
 
-def load_images_from_folder(folder, progress=gr.Progress()):
+def set_microscope(choice):
+    """The microscope the folder came from, as chosen on the Setup tab."""
+    state.microscope = choice if choice in ("SEM", "TEM") else None
+    return state.microscope
+
+
+def microscope_in_files(paths, limit=8):
+    """
+    SEM or TEM, when the first few files of a folder say so and agree; else None.
+
+    Only what the files state: their tags, or the .txt a JEOL SEM writes beside
+    each image. Reading tags is cheap; no image is decoded.
+    """
+    from sem_particle_analysis import modality
+    from sem_particle_analysis.sidecar import read_sidecar
+    from sem_particle_analysis.utils import extract_tiff_metadata
+
+    kinds = set()
+    for path in list(paths)[:limit]:
+        metadata = None
+        if str(path).lower().endswith((".tif", ".tiff")):
+            try:
+                metadata = extract_tiff_metadata(str(path))
+            except Exception:
+                metadata = None
+        kind = modality.detect(metadata=metadata, sidecar=read_sidecar(path)).kind
+        if kind in ("SEM", "TEM"):
+            kinds.add(kind)
+    return kinds.pop() if len(kinds) == 1 else None
+
+
+def load_images_from_folder(folder, microscope=None, progress=gr.Progress()):
     """
     Open every image in one folder, and the results file that belongs to it.
 
@@ -185,10 +217,13 @@ def load_images_from_folder(folder, progress=gr.Progress()):
     one results file: a file shared between folders would mix up images that
     happen to have the same names.
 
+    The microscope is the one chosen on Setup; when none is, the files are
+    asked, and when they do not say either, the status asks the analyst.
+
     Returns:
-        tuple: (status text, gallery update, tabs update)
+        tuple: (status text, gallery update, tabs update, microscope update)
     """
-    unchanged = (gr.update(), gr.update())
+    unchanged = (gr.update(), gr.update(), gr.update())
     try:
         folder = clean_path(folder)
         if not folder:
@@ -223,6 +258,7 @@ def load_images_from_folder(folder, progress=gr.Progress()):
         # saving it now would file it under this folder's first image.
         state.reset_image_state()
         state.scale_baseline = None
+        state.scale_baselines = []
         state.processed_images = {}
         state.results_manager = results_manager
 
@@ -233,16 +269,32 @@ def load_images_from_folder(folder, progress=gr.Progress()):
         progress(0.7, desc="Creating gallery...")
         gallery_data = create_image_gallery()
 
+        progress(0.85, desc="Reading the instrument...")
+        in_files = microscope_in_files(image_paths)
+        chosen = microscope if microscope in ("SEM", "TEM") else None
+        state.microscope = chosen or in_files
+
         count = len(image_paths)
         status_parts = [f"✅ {count} image{'' if count == 1 else 's'} in {folder}. "
                         f"Results are saved to {RESULTS_FILENAME} there."]
+        if chosen and in_files and in_files != chosen:
+            status_parts.append(f"⚠️ Set to {chosen}, but the files say {in_files}: "
+                                "check the Microscope choice above.")
+        elif chosen:
+            status_parts.append(f"Microscope: {chosen}.")
+        elif in_files:
+            status_parts.append(f"Microscope: {in_files}, read from the files.")
+        else:
+            status_parts.append("⚠️ The files do not say which microscope made them: "
+                                "choose SEM or TEM above.")
         if matched > 0:
             status_parts.append(f"{matched} already analysed.")
         if unmatched > 0:
             status_parts.append(f"⚠️ {unmatched} row{'' if unmatched == 1 else 's'} in "
                                 "the results file match no image in this folder.")
 
-        return " ".join(status_parts), gallery_data, gr.Tabs(selected=1)
+        return (" ".join(status_parts), gallery_data, gr.Tabs(selected=1),
+                gr.update(value=state.microscope))
 
     except Exception as e:
         import traceback

@@ -11,7 +11,8 @@ Marked slow: EasyOCR downloads and loads detection models on first use.
 import numpy as np
 import pytest
 
-from synthetic import databar_region, make_burnin_micrograph, make_micrograph
+from synthetic import (databar_region, make_burnin_micrograph, make_fei_frame,
+                       make_jeol_frame, make_micrograph, make_zeiss_frame)
 
 pytestmark = pytest.mark.slow
 
@@ -156,3 +157,59 @@ class TestTheAutomaticReadSearchesEverywhere:
         with pytest.raises(ValueError):
             scale_detector.detect_scale_bar(
                 image, region_x=0.75, region_y=0.5, region_width=0.3, region_height=0.1)
+
+
+class TestTheBarBesideItsLabel:
+    """
+    The label is found first and the bar beside it measured. Taking the largest
+    line in the region instead measured a databar divider, half an FEI bar, the
+    "=" of "Mag =", and gave Zeiss bars their ticks' outer edges.
+    """
+
+    def test_a_zeiss_bar_is_measured_between_its_ticks(self, scale_detector):
+        image, truth = make_zeiss_frame()
+        found = scale_detector.detect_scale_bar_anywhere(image)
+        assert found["scale_nm"] == pytest.approx(truth["scale_nm"])
+        assert found["pixel_length"] == pytest.approx(truth["bar_length_px"], abs=1)
+
+    def test_a_date_is_not_read_as_angstroms(self, scale_detector):
+        # "20 Aug" in the Zeiss strip once parsed as 20 Å.
+        image, truth = make_zeiss_frame()
+        found = scale_detector.detect_scale_bar_anywhere(image)
+        assert found["scale_nm"] != pytest.approx(2.0)
+
+    def test_an_fei_bar_split_by_its_label_is_one_bar(self, scale_detector):
+        image, truth = make_fei_frame()
+        found = scale_detector.detect_scale_bar_anywhere(image)
+        assert found["scale_nm"] == pytest.approx(truth["scale_nm"])
+        assert found["pixel_length"] == pytest.approx(truth["bar_length_px"], abs=2)
+
+    def test_a_jeol_label_among_instrument_settings(self, scale_detector):
+        # 15.0kV, X15,000 and 15.0mm are all numbers with units; only 1µm is
+        # the bar's.
+        image, truth = make_jeol_frame()
+        found = scale_detector.detect_scale_bar_anywhere(image)
+        assert found["scale_nm"] == pytest.approx(truth["scale_nm"])
+        assert found["pixel_length"] == pytest.approx(truth["bar_length_px"], abs=1)
+
+    def test_the_mark_covers_the_bar_and_label_only(self, scale_detector):
+        image, truth = make_zeiss_frame()
+        found = scale_detector.detect_scale_bar_anywhere(image)
+        x, y, w, h = found["mark"]
+        assert w < image.shape[1] // 3
+
+
+class TestLabelValues:
+    """Repairs to what OCR makes of a label, checked without OCR."""
+
+    @pytest.mark.parametrize("text, nanometres", [
+        ("5 µm", 5000), ("0 5 Hmn", 500), ("Ium", 1000), ("U2 um", 200),
+        (".5 um", 500), ("05 µm", 500), ("20 um*", 20000), ("400 nm", 400),
+        ("1 mm", 1_000_000), ("200 nm)", 200), ("0.5 Mm", 500),
+    ])
+    def test_repairs(self, scale_detector, text, nanometres):
+        assert scale_detector._label_value(text) == pytest.approx(nanometres)
+
+    @pytest.mark.parametrize("text", ["15.0kV", "X15,000", "Teneo", "Mag =", "20 Aug", "WD"])
+    def test_not_labels(self, scale_detector, text):
+        assert scale_detector._label_value(text) is None

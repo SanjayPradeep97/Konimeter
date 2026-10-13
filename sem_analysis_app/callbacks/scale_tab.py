@@ -89,19 +89,24 @@ def _raw_metadata():
         return None
 
 
+def _sidecar_text():
+    """The .txt an instrument wrote beside the current image, or None."""
+    if not state.image_paths or state.current_index >= len(state.image_paths):
+        return None
+    from sem_particle_analysis.sidecar import read_sidecar
+
+    return read_sidecar(state.image_paths[state.current_index])
+
+
 def _bar_region(calibration):
     """
-    Where the scale bar sits in the frame, as (x0, y0, w, h), or None.
+    Where the scale bar and its label sit in the frame, as (x0, y0, w, h), or None.
 
     Only meaningful when the bar was found inside the image itself.
     """
-    # Not named `region`: that is the module handling analysable area, imported
-    # above and used a few lines further down.
-    found = sc.search_box(calibration)
-    if found is None:
+    if calibration is None or state.current_image is None:
         return None
-    x0, y0, x1, y1 = found
-    return (x0, y0, max(1, x1 - x0), max(1, y1 - y0))
+    return sc.printed_area(calibration, state.current_image.shape)
 
 
 def _apply_frame_geometry(calibration):
@@ -148,9 +153,9 @@ def _apply_frame_geometry(calibration):
         state.crop_percent = 0.0
         state.scale_bar_region = _bar_region(calibration)
 
-    # Which instrument this is sets which way round the particles are expected
-    # to be, unless the analyst has said (state.particle_choice).
-    state.modality = modality.detect(image, metadata=_raw_metadata())
+    # What the file says about its instrument: shown, compared with the
+    # microscope chosen on Setup, and used when none was chosen.
+    state.modality = modality.detect(metadata=_raw_metadata(), sidecar=_sidecar_text())
 
     # Everything in the frame that is not specimen — beam-blocked area, and the
     # scale bar when it is printed inside the image. Left out of segmentation, so
@@ -193,17 +198,24 @@ def frame_summary():
     if kind is None:
         return "Load an image to detect the instrument."
 
-    if kind.kind == modality.UNKNOWN:
-        lines = [f"**Instrument not known** — {kind.detail}"]
+    chosen = state.microscope
+    if chosen in ("SEM", "TEM"):
+        line = f"**{chosen}** (chosen on Setup)"
+        if kind.kind not in (modality.UNKNOWN, chosen):
+            line += f" — ⚠️ but this file says {kind.label} ({kind.detail})"
+        lines = [line]
+    elif kind.kind != modality.UNKNOWN:
+        lines = [f"**{kind.label}** (from the file) — {kind.detail}"]
     else:
-        source = "from the file" if kind.from_metadata else "a guess"
-        lines = [f"**{kind.label}** ({source}) — {kind.detail}"]
+        lines = ["**Microscope not set** — choose SEM or TEM on the Setup tab, "
+                 "so the app knows whether the particles are brighter or darker."]
 
     polarity = {None: "either darker or brighter, whichever stands out more",
                 False: "**brighter** than the background",
                 True: "**darker** than the background"}
     choice = state.particle_choice
-    resolved = (POLARITY_CHOICES[choice] if choice != "auto" else kind.dark_particles)
+    resolved = (POLARITY_CHOICES[choice] if choice != "auto"
+                else {"SEM": False, "TEM": True}.get(state.microscope_kind()))
     lines.append(f"Particles expected to be {polarity[resolved]}"
                  + (" (set by you)" if choice != "auto" else "")
                  + ". Change it under *Particles are* on the Segment & Refine tab.")
@@ -248,10 +260,9 @@ def frame_header():
         if not cal.trustworthy:
             scale += " (unconfirmed)"
 
-    kind = getattr(state, "modality", None)
-    bits = [f"**{name}**", f"{state.current_index + 1} of {total}", scale]
-    if kind is not None:
-        bits.append(kind.label)
+    kind = state.microscope_kind()
+    bits = [f"**{name}**", f"{state.current_index + 1} of {total}", scale,
+            kind or "microscope not set"]
 
     info = getattr(state, "region_info", None) or {}
     blocked = 1 - info.get("analysable_fraction", 1.0)
@@ -406,6 +417,13 @@ def _try_automatic_bar(payload, tier1_message):
                 "the bar (tier 3).",
                 _status_lines(), "", frame_summary())
 
+    # A misreading corrected before: the same reading of a bar the same length.
+    corrected = state.known_correction(float(found["scale_nm"]), float(found["pixel_length"]))
+    if corrected:
+        found = dict(found, scale_nm=corrected,
+                     conversion=corrected / float(found["pixel_length"]),
+                     ocr_text=f"{sc.format_length(corrected)} (corrected as before)",
+                     warning=None)
     calibration = sc.ScaleCalibration(
         nm_per_px=float(found["conversion"]),
         method="box_ocr",
@@ -420,6 +438,8 @@ def _try_automatic_bar(payload, tier1_message):
         # on the bar rather than only reported as a number.
         extra={"region": found.get("region"),
                "region_name": found.get("region_name"),
+               "mark": found.get("mark"),
+               "ocr_text": found.get("ocr_text", ""),
                "line_coords": found.get("line_coords")},
     )
     _adopt(calibration)
@@ -479,11 +499,33 @@ def apply_two_points(points_json, value, unit):
             _status_lines())
 
 
-def confirm_scale():
-    """Mark the current calibration as checked by a human."""
+def confirm_scale(value=None, unit=None):
+    """
+    Mark the current calibration as checked by a human, with the value printed
+    on the bar corrected if OCR misread it.
+
+    Args:
+        value, unit: The bar's printed length as the analyst sees it. Given for
+            a bar reading; when it differs from what was read, the measured bar
+            is kept and only its value replaced.
+    """
     cal = getattr(state, "scale_calibration", None)
     if cal is None:
         return "❌ Nothing to confirm yet", _status_lines()
+    if cal.method == "box_ocr" and cal.pixel_length and value not in (None, "") and unit:
+        try:
+            corrected = sc.relabelled(cal, float(value), unit)
+        except (sc.ScaleError, ValueError) as exc:
+            return f"❌ {exc}", _status_lines()
+        if abs(corrected.scale_nm - (cal.scale_nm or 0)) > 1e-9 * corrected.scale_nm:
+            # Remembered against what OCR first read; set back to that, there is
+            # nothing to remember.
+            read = corrected.extra["read_nm"]
+            state.remember_correction(read, cal.pixel_length, corrected.scale_nm)
+            _adopt(corrected)
+            state.accept_scale(corrected)
+            return (f"✅ Scale confirmed with the bar's value corrected to "
+                    f"{sc.format_length(corrected.scale_nm)}"), _status_lines()
     cal.confirmed = True
     cal.warning = None
     state.scale_info = cal.to_dict()
@@ -623,7 +665,8 @@ def review():
         return None, ""
 
     baseline = getattr(state, "scale_baseline", None)
-    if baseline and abs(cal.nm_per_px - baseline) <= SAME_SCALE_TOLERANCE * baseline:
+    accepted = getattr(state, "scale_baselines", None) or ([baseline] if baseline else [])
+    if any(abs(cal.nm_per_px - b) <= SAME_SCALE_TOLERANCE * b for b in accepted):
         return None, ""
     if baseline:
         return "check", (f"**{cal.nm_per_px:.4g} nm/px** — a different "
@@ -667,19 +710,34 @@ def check_outputs():
 
     Returns:
         tuple: (span_payload, scale_preview, check_row, check_message,
-                check_image, tab)
+                check_image, value, unit, value on the working tab, unit on the
+                working tab, tab)
     """
     level, message = review()
     view = scale_check_view()
-    return (scale_span_payload(),
-            view,                                  # beside the canvas
-            gr.update(visible=level == "check"),
-            message,
-            view,                                  # again, on the working tab
-            gr.Tabs(selected=2) if level == "stop" else gr.update())
+    return ((scale_span_payload(),
+             view,                                  # beside the canvas
+             gr.update(visible=level == "check"),
+             message,
+             view)                                  # again, on the working tab
+            + printed_value_fields() * 2
+            + (gr.Tabs(selected=2) if level == "stop" else gr.update(),))
 
 
-def accept_from_work_tab():
+def printed_value_fields():
+    """
+    The value read off the bar, ready to correct, for a bar reading; hidden for
+    any other scale. OCR misreads the number far more often than it mismeasures
+    the bar, so correcting the number is the quick fix.
+    """
+    cal = getattr(state, "scale_calibration", None)
+    if cal is None or cal.method != "box_ocr" or not cal.pixel_length or not cal.scale_nm:
+        return gr.update(visible=False), gr.update(visible=False)
+    value, unit = sc.split_length(cal.scale_nm)
+    return gr.update(value=value, visible=True), gr.update(value=unit, visible=True)
+
+
+def accept_from_work_tab(value=None, unit=None):
     """
     Confirm the scale from the working tab, without going to look for it.
 
@@ -687,5 +745,5 @@ def accept_from_work_tab():
     analyst switch tabs to accept what they have already looked at is what makes
     supervision expensive enough to skip.
     """
-    confirm_scale()
+    confirm_scale(value, unit)
     return check_outputs() + (frame_header(), _status_lines())

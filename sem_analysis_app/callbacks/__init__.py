@@ -8,6 +8,7 @@ from .setup import (
     initialize_sam,
     load_images_from_folder,
     restore_setup,
+    set_microscope,
     set_save_dataset,
 )
 from .gallery import (
@@ -36,6 +37,7 @@ from .segmentation import (
     segment_with_sam,
     select_mask_and_analyze,
     set_particle_polarity,
+    rerank,
 )
 from .refinement import (
     get_current_visualization,
@@ -106,6 +108,7 @@ __all__ = [
     "reset_point_refine",
     "restore_session",
     "restore_setup",
+    "set_microscope",
     "save_and_next",
     "save_current_results",
     "segment_with_sam",
@@ -116,6 +119,7 @@ __all__ = [
     "set_crop_override",
     "set_min_particle_size",
     "set_particle_polarity",
+    "rerank",
     "set_point_type",
     "set_save_dataset",
     "skip_to_next",

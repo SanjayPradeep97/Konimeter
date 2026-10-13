@@ -52,6 +52,10 @@ class AppState:
         # otherwise be measured as particles.
         self.analysable_region = None
         self.region_info = {}
+        # "SEM" | "TEM" | None: the microscope the folder came from, chosen on
+        # the Setup tab (or read from the files). Sets which way round the
+        # particles are expected to be.
+        self.microscope = None
         # "auto" | "bright" | "dark": which way the particles differ from the
         # background, when the analyst has said. Kept across images in a session
         # because a folder is normally one kind of sample on one instrument.
@@ -73,6 +77,12 @@ class AppState:
         # same way, so it is let through without a stop; anything else is worth a
         # look. Used only to decide whether to interrupt, never to set a scale.
         self.scale_baseline = None
+        # Every scale accepted this run, so a folder at several magnifications
+        # asks once for each rather than every time it changes.
+        self.scale_baselines = []
+        # {(value read, bar length in px): value printed}, for OCR misreadings
+        # the analyst has corrected. Kept for the whole session.
+        self.label_corrections = {}
         self.selected_mask_index = None
         self.analyzer = None
         self.min_particle_size = 30  # Minimum particle size in pixels for filtering
@@ -187,6 +197,16 @@ class AppState:
         self.analyzer._relabel()
         return True
 
+    def microscope_kind(self):
+        """
+        SEM or TEM for the image on screen, or None: the analyst's choice on
+        Setup, or else what the file says.
+        """
+        if self.microscope in ("SEM", "TEM"):
+            return self.microscope
+        kind = getattr(self.modality, "kind", None)
+        return kind if kind in ("SEM", "TEM") else None
+
     def accept_scale(self, calibration):
         """
         Record a scale the analyst has accepted, as the yardstick for the next.
@@ -198,6 +218,27 @@ class AppState:
         """
         if calibration is not None:
             self.scale_baseline = float(calibration.nm_per_px)
+            if self.scale_baseline not in self.scale_baselines:
+                self.scale_baselines.append(self.scale_baseline)
+
+    def remember_correction(self, read_nm, pixel_length, corrected_nm):
+        """
+        A label OCR misread, and what it really says. The same misreading of a bar
+        the same length is the same label on the same instrument, so it is
+        corrected the same way next time.
+        """
+        if read_nm and pixel_length:
+            key = (round(read_nm, 3), round(pixel_length))
+            if abs(corrected_nm - read_nm) <= 1e-9 * read_nm:
+                self.label_corrections.pop(key, None)       # set back to what was read
+            else:
+                self.label_corrections[key] = corrected_nm
+
+    def known_correction(self, read_nm, pixel_length):
+        """The corrected value for a reading misread before, or None."""
+        if not read_nm or not pixel_length:
+            return None
+        return self.label_corrections.get((round(read_nm, 3), round(pixel_length)))
 
     def current_path(self):
         """Path of the image on screen, or None."""
