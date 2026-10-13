@@ -58,9 +58,9 @@ The tabs, in the order they are used:
 | ⚙️ Setup | Load the SAM model (the first time, download it with the button there), then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it |
 | 🖼️ Gallery | Pick an image. Ticked images already have saved results |
 | 📏 Scale & Frame | Establish the scale (below), and check what the app decided about the instrument and the analysable area |
-| 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include and exclude clicks. Every click and every applied change can be undone |
+| 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include and exclude clicks. Every click and every applied change can be undone. *Particles are* (darker / brighter than the background) sets which candidates come first |
 | 💾 Results | The measurements per image, and the whole folder's results: delete rows, remove duplicates, export |
-| 📊 Plots | Size distributions across everything saved |
+| 📊 Plots | Size distributions across everything saved, on a log or linear size axis. On log, with the geometric mean and geometric standard deviation |
 
 The masks of the classification dataset were made on the Segment & Refine tab.
 
@@ -110,17 +110,29 @@ checkpoint.
 
 ## SEM and TEM in one workflow
 
-The two need opposite handling, and the app works out which it is looking at from
-the file rather than asking you to remember:
+SAM proposes outlines for both what stands out dark and what stands out bright,
+and the app has to put the right one first. With small particles that is easy;
+with a large one, the particle and the background around it are equally
+plausible, and only knowing which way round the image is settles it.
 
-| | SEM | TEM |
-| --- | --- | --- |
-| Instrument read from | FEI / Zeiss / Hitachi / TESCAN tags | JEOL mode tag, else frame shape |
-| Databar | detected and trimmed | none, frame kept whole |
-| Scale bar | in the databar, which gets cropped | burned into the frame, so its patch is excluded from measurement |
-| Particles are | **brighter** than the substrate | **darker** than the support film |
+That is what **Particles are** on the Segment & Refine tab says: *darker* than
+the background (TEM bright field, the usual case), *brighter* (most SEM images),
+or *Auto*. Auto goes by the file: FEI and JEOL files name the instrument, Zeiss,
+Hitachi and TESCAN files are SEM, and a square frame with no metadata is taken to
+be from a TEM camera. Otherwise Auto puts first whichever side stands out more.
+The choice only orders the candidates; the other side is still offered after
+them. It is kept until you change it, so set it once per folder. For the demo
+images in `demo/images/`, which carry no metadata, set it to *Darker*.
 
-Both decisions are shown on the Scale & Frame tab and can be overridden there.
+An information strip (databar) below the image, as most SEMs write, is found and
+cut off; it must begin with a sharp edge, so plain shading at the bottom of a
+frame is never taken for one. A scale bar burned into the image itself, as on
+most TEMs, is left out of measurement instead.
+
+`tests/test_demo_benchmark.py` scores SAM's first suggestion against the expert
+masks of the 60 demo images (overlap of at least half counts as right): 41 right
+on Auto and 48 on *Darker*, with the right outline among the three offered for
+52 and 54, and one image with no suggestion at all.
 
 **Analysable region.** Micrographs routinely contain large areas that are not
 specimen: the black corners left by a circular aperture, a specimen grid bar

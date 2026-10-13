@@ -6,8 +6,17 @@ from sem_particle_analysis.data_manager import parse_measurement_list
 
 from ..state import state
 
-def update_histogram_plots():
-    """Generate histogram plots for all particles from all images in the session."""
+# The choices on the Plots tab, and whether each draws the size axis in log.
+AXIS_CHOICES = {"Log": True, "Linear": False}
+
+
+def update_histogram_plots(axis="Log"):
+    """
+    Generate histogram plots for all particles from all images in the session.
+
+    Args:
+        axis (str): "Log" or "Linear", for the size axis.
+    """
     try:
         if state.results_manager is None:
             return None, "❌ No results manager initialized. Save some image results first."
@@ -43,7 +52,8 @@ def update_histogram_plots():
         # sem_analysis_app, so the Plots tab reported "No module named
         # 'visualization'" wherever the app is actually launched from.
         from ..visualization import create_histogram_plots
-        histogram_img = create_histogram_plots(combined_measurements)
+        histogram_img = create_histogram_plots(combined_measurements,
+                                               log_scale=AXIS_CHOICES.get(axis, True))
 
         images = len(results_df)
         status = (f"✅ {len(all_areas)} particle{'' if len(all_areas) == 1 else 's'} "

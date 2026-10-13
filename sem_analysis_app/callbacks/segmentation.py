@@ -18,16 +18,58 @@ POLARITY_CHOICES = {"auto": None, "bright": False, "dark": True}
 
 def _particle_polarity():
     """
-    Whether particles are the darker side of the frame, or None to use contrast.
+    Whether particles are expected to be the darker side of the frame, or None.
 
-    An explicit choice wins; otherwise the detected modality decides, since
-    material on an SEM filter reads brighter than the membrane and
-    electron-dense material in TEM reads darker than the support film.
+    An explicit choice wins; otherwise the detected instrument decides, since
+    electron-dense material in TEM bright field reads darker than the support
+    film and material on an SEM substrate usually reads brighter. It orders the
+    candidates and never hides any, so a wrong expectation costs a click.
     """
     chosen = getattr(state, "particle_choice", "auto") or "auto"
     if chosen != "auto":
         return POLARITY_CHOICES[chosen]
     return state.modality.dark_particles if state.modality else None
+
+
+def _rank_and_show():
+    """
+    Rank the outlines SAM last returned and draw them as the candidates.
+
+    Returns:
+        tuple: (candidate image, status, mask_choice update)
+    """
+    # Everything that is not specimen: beam-blocked area — an SEM aperture
+    # vignette, a TEM grid bar — and a scale bar printed inside the frame.
+    # All of them out-contrast the particles, so leaving them in means
+    # measuring them instead.
+    analysable = getattr(state, "analysable_region", None)
+    exclude = ~analysable if analysable is not None else None
+
+    # Rank by contrast rather than showing SAM's raw output in its own order.
+    # Either polarity of any candidate may be the one holding the objects, and
+    # the highest-confidence mask is frequently the background.
+    state.candidates = state.segmenter.rank_candidates(
+        state.cropped_image, state.segmenter.masks, top_k=3,
+        dark_features=_particle_polarity(), exclude=exclude,
+    )
+
+    if not state.candidates:
+        state.masks = None
+        return (None,
+                "❌ SAM found nothing that stands out from the background. Draw "
+                "the particles with the Add tool, or try a smaller Smallest particle.",
+                gr.update(choices=[], value=None))
+
+    state.masks = [c["mask"] for c in state.candidates]
+    labels = [f"Option {i + 1}" for i in range(len(state.candidates))]
+    mask_viz = visualize_three_masks(state.cropped_image, state.masks, labels)
+
+    # Offer exactly the candidates that survived ranking; a fixed three-way
+    # choice lets the analyst pick an option that does not exist.
+    return (mask_viz,
+            f"✅ {len(state.masks)} candidate(s), best first. "
+            f"Pick one, then refine with clicks.",
+            gr.update(choices=labels, value=labels[0]))
 
 
 def segment_with_sam(progress=gr.Progress()):
@@ -46,57 +88,41 @@ def segment_with_sam(progress=gr.Progress()):
         )
 
         progress(0.7, desc="Ranking candidates...")
-        # Everything that is not specimen: beam-blocked area — an SEM aperture
-        # vignette, a TEM grid bar — and a scale bar printed inside the frame.
-        # All of them out-contrast the particles, so leaving them in means
-        # measuring them instead.
-        analysable = getattr(state, "analysable_region", None)
-        exclude = ~analysable if analysable is not None else None
-
-        # Which side of the frame holds the particles. Left to contrast, this
-        # picks the vignette or the grid bar; the modality knows the answer.
-        dark_particles = _particle_polarity()
-
-        # Rank by contrast rather than showing SAM's raw output in its own order.
-        # Either polarity of any candidate may be the one holding the objects, and
-        # the highest-confidence mask is frequently the background.
-        state.candidates = state.segmenter.rank_candidates(
-            state.cropped_image, raw_masks, top_k=3,
-            dark_features=dark_particles, exclude=exclude,
-        )
-
-        if not state.candidates:
-            state.masks = None
-            return (None,
-                    "❌ No candidate isolated anything convincing. The features may be "
-                    "too faint — try Point Refine, or adjust the crop.",
-                    gr.update(choices=[], value=None))
-
-        state.masks = [c["mask"] for c in state.candidates]
-        labels = [f"Option {i + 1}" for i in range(len(state.candidates))]
-
-        progress(0.9, desc="Creating visualization...")
-        mask_viz = visualize_three_masks(state.cropped_image, state.masks, labels)
-
+        shown = _rank_and_show()
         progress(1.0, desc="Complete!")
-
-        # Offer exactly the candidates that survived ranking; a fixed three-way
-        # choice lets the analyst pick an option that does not exist.
-        choices = [f"Option {i + 1}" for i in range(len(state.candidates))]
-        return (mask_viz,
-                f"✅ {len(state.masks)} candidate(s), best first. "
-                f"Pick one, then refine with clicks.",
-                gr.update(choices=choices, value=choices[0]))
+        return shown
 
     except Exception as e:
         return None, f"❌ Error: {str(e)}", gr.update()
+
+
+def set_particle_polarity(choice):
+    """
+    Say which way the particles differ from the background, and re-sort the
+    candidates to match. SAM's outlines are kept, so this takes no time.
+
+    Returns:
+        tuple: (candidate image, status, mask_choice update)
+    """
+    state.particle_choice = choice or "auto"
+    segmenter = state.segmenter
+    if (segmenter is None or getattr(segmenter, "masks", None) is None
+            or state.cropped_image is None
+            or segmenter.masks[0].shape != state.cropped_image.shape[:2]):
+        return gr.update(), gr.update(), gr.update()
+    try:
+        return _rank_and_show()
+    except Exception as e:
+        return gr.update(), f"❌ Error: {str(e)}", gr.update()
 
 
 def select_mask_and_analyze(mask_choice, progress=gr.Progress()):
     """Select mask and run initial analysis."""
     try:
         if state.masks is None:
-            return gr.update(), gr.update(), "❌ No masks available", gr.update(), gr.update()
+            return (gr.update(), gr.update(),
+                    "❌ No candidate to use. Press Segment, or draw the particles "
+                    "with the Add tool.", gr.update(), gr.update())
 
         # Parse mask index
         mask_index = int(mask_choice.split()[1]) - 1

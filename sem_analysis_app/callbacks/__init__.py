@@ -27,15 +27,15 @@ from .scale_tab import (
     frame_summary,
     live_point_readout,
     prepare_scale_tab,
+    restore_scale_tab,
     read_box_scale,
     set_canvas_mode,
     set_crop_override,
-    set_modality,
-    set_particle_polarity,
 )
 from .segmentation import (
     segment_with_sam,
     select_mask_and_analyze,
+    set_particle_polarity,
 )
 from .refinement import (
     get_current_visualization,
@@ -57,6 +57,7 @@ from .plots import (
 from .workflow import (
     auto_process_current_image,
     open_current_image,
+    restore_working_tab,
     save_and_next,
     skip_to_next,
 )
@@ -99,6 +100,8 @@ __all__ = [
     "load_images_from_folder",
     "open_current_image",
     "prepare_scale_tab",
+    "restore_scale_tab",
+    "restore_working_tab",
     "read_box_scale",
     "reset_point_refine",
     "restore_session",
@@ -112,7 +115,6 @@ __all__ = [
     "set_click_mode",
     "set_crop_override",
     "set_min_particle_size",
-    "set_modality",
     "set_particle_polarity",
     "set_point_type",
     "set_save_dataset",

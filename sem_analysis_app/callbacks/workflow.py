@@ -17,10 +17,11 @@ from ..state import state
 from .segmentation import segment_with_sam
 from .results import save_current_results
 from .scale_tab import frame_header, prepare_scale_tab
+from ..visualization import for_display
 
 
 # How many outputs open_current_image fills (ui.OPEN_OUTPUTS).
-OPEN_COUNT = 11
+OPEN_COUNT = 12
 
 
 def _load_index(index):
@@ -85,15 +86,58 @@ def open_current_image(progress=gr.Progress()):
     Returns:
         tuple: (canvas_payload, tier1_status, scale_summary, point_readout,
                 frame_status, header, mask_viz, segment_status, mask_choice,
-                tool, point_type)
+                tool, point_type, working view)
     """
     payload, tier1, summary, hint, frame = prepare_scale_tab()
     mask_viz, segment_status, choice = auto_process_current_image(progress)
     # The header is built last, so it can report the particle count. The two
     # tool controls are set to what reset_image_state left in state, so the
-    # screen cannot show Merge while clicks queue deletions.
+    # screen cannot show Merge while clicks queue deletions. The working view
+    # shows the new frame plain: left alone, it kept the previous image's
+    # outlines under the new image's candidates until one was chosen.
+    frame_view = state.cropped_image if state.cropped_image is not None else state.current_image
     return (payload, tier1, summary, hint, frame, frame_header(),
-            mask_viz, segment_status, choice, state.click_mode, state.point_type)
+            mask_viz, segment_status, choice, state.click_mode, state.point_type,
+            for_display(frame_view))
+
+
+def restore_working_tab():
+    """
+    The Segment & Refine tab as the session has it, for a browser connecting
+    mid-image. A refresh used to show it empty, with three candidates on offer
+    whatever SAM had actually returned.
+
+    Returns:
+        tuple: (mask_viz, segment_status, mask_choice, working view, measurements,
+                header, candidate panel)
+    """
+    from .refinement import get_current_visualization
+    from ..visualization import create_results_dataframe, visualize_three_masks
+
+    if state.current_image is None:
+        return (None, "", gr.update(choices=[], value=None), None, None,
+                frame_header(), gr.update())
+
+    frame = state.cropped_image if state.cropped_image is not None else state.current_image
+    if state.masks:
+        labels = [f"Option {i + 1}" for i in range(len(state.masks))]
+        chosen = state.selected_mask_index
+        value = labels[chosen] if chosen is not None and chosen < len(labels) else labels[0]
+        candidates = visualize_three_masks(frame, state.masks, labels)
+        choice = gr.update(choices=labels, value=value)
+        status = f"↻ Reconnected — {len(labels)} candidate(s), best first."
+    else:
+        candidates, choice = None, gr.update(choices=[], value=None)
+        status = "↻ Reconnected — press Segment to get candidates."
+
+    if state.analyzer is not None:
+        view = get_current_visualization()
+        table = create_results_dataframe(state.analyzer.get_measurements(in_nm=True))
+    else:
+        view, table = for_display(frame), None
+    # Candidates open until one is chosen, as when the image was first opened.
+    return (candidates, status, choice, view, table, frame_header(),
+            gr.update(open=state.analyzer is None))
 
 
 def save_and_next(progress=gr.Progress()):

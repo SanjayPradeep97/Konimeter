@@ -9,6 +9,7 @@ from ..visualization import (
     create_point_refine_visualization,
     create_results_dataframe,
     create_summary_statistics_table,
+    display_factor,
 )
 from ..state import state
 
@@ -97,7 +98,9 @@ def handle_image_click(evt: gr.SelectData):
         if state.analyzer is None:
             return get_current_visualization(), "❌ No analysis available"
 
-        x, y = evt.index[0], evt.index[1]
+        # The view may be an enlarged copy of the frame (visualization.for_display).
+        factor = display_factor(state.cropped_image.shape)
+        x, y = evt.index[0] // factor, evt.index[1] // factor
 
         if state.click_mode in ("add", "point_refine") and state.segmenter is None:
             # These two ask SAM what is under the click; the other two only

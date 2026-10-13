@@ -27,7 +27,15 @@ def no_progress(*args, **kwargs):
 
 
 def click(x, y):
-    return types.SimpleNamespace(index=(x, y))
+    """A click on frame pixel (x, y), as the browser reports it: in the
+    coordinates of the working view, which enlarges small frames."""
+    from sem_analysis_app.state import state
+    from sem_analysis_app.visualization import display_factor
+
+    factor = display_factor(state.cropped_image.shape)
+    # Anywhere inside the enlarged pixel lands on the same frame pixel.
+    return types.SimpleNamespace(index=(x * factor + factor // 2,
+                                        y * factor + factor // 2))
 
 
 def stub_sam(mask):
@@ -391,3 +399,27 @@ class TestTablesSayTheirUnit:
         analyzer = ParticleAnalyzer(conversion_factor=None)
         analyzer.analyze_mask(np.zeros((50, 50), dtype=bool), remove_border=False)
         assert "Diameter (px)" in create_results_dataframe(analyzer.get_measurements()).columns
+
+
+class TestTheWorkingView:
+    def test_a_small_frame_is_enlarged_by_a_whole_number(self):
+        from sem_analysis_app.visualization import display_factor, for_display
+
+        frame = np.zeros((512, 512, 3), np.uint8)
+        assert display_factor(frame.shape) == 2
+        assert for_display(frame).shape == (1024, 1024, 3)
+
+    def test_a_large_frame_is_left_alone(self):
+        from sem_analysis_app.visualization import display_factor, for_display
+
+        frame = np.zeros((2048, 2048, 3), np.uint8)
+        assert display_factor(frame.shape) == 1
+        assert for_display(frame) is frame
+
+    def test_particle_numbers_grow_with_the_frame(self):
+        # Shown at a third of its size, a 2048px frame's numbers were a few
+        # screen pixels tall.
+        from sem_analysis_app.visualization import _drawing_sizes
+
+        assert _drawing_sizes((2048, 2048))["font_scale"] >= 2 * _drawing_sizes((1024, 1024))["font_scale"] * 0.9
+        assert _drawing_sizes((512, 512))["font_scale"] >= 0.6

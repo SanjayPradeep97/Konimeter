@@ -5,6 +5,15 @@ import os
 import cv2
 import numpy as np
 
+# Microscope TIFFs carry private tags OpenCV does not know, and it prints a
+# warning for every one of them on every read: a dozen lines per image in the
+# window an analyst watches, each looking like something went wrong. Errors
+# are still printed.
+try:
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+except AttributeError:  # pragma: no cover - builds without the logging module
+    pass
+
 try:
     import tifffile
     TIFFFILE_AVAILABLE = True

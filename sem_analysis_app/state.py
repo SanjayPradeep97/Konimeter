@@ -52,10 +52,9 @@ class AppState:
         # otherwise be measured as particles.
         self.analysable_region = None
         self.region_info = {}
-        # "auto" | "SEM" | "TEM": an analyst's override of detection, kept across
-        # images in a session because a folder is normally one instrument.
-        self.modality_choice = "auto"
-        # "auto" | "bright" | "dark": likewise for particle polarity.
+        # "auto" | "bright" | "dark": which way the particles differ from the
+        # background, when the analyst has said. Kept across images in a session
+        # because a folder is normally one kind of sample on one instrument.
         self.particle_choice = "auto"
         # Whether saving a frame also keeps its image and mask as training data
         # (sem_particle_analysis.dataset). Session-wide, set on the Setup tab.
@@ -130,8 +129,8 @@ class AppState:
         # (x0, y0, w, h) of a scale bar printed inside the frame, excluded from
         # segmentation so it isn't measured as a particle.
         self.scale_bar_region = None
-        # Per-image, unlike modality_choice/particle_choice which the analyst
-        # sets once for a folder.
+        # Per-image, unlike particle_choice, which the analyst sets once for a
+        # folder.
         self.modality = None
         self.analysable_region = None
         self.region_info = {}

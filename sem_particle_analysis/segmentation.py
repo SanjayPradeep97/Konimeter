@@ -96,10 +96,14 @@ class ParticleSegmenter:
 
         return self.masks, self.scores
 
-    # A credible mask covers some but not most of the frame. SAM's full-image box
-    # prompt reliably also returns a near-empty and a near-complete candidate.
+    # A credible mask covers some but not all of the frame. SAM's full-image box
+    # prompt reliably also returns a near-empty and a near-complete candidate,
+    # and the near-complete one is background, whose complement is the particles.
+    # The ceiling is high because one particle can fill most of a frame: at 35%,
+    # every large aggregate in the NIOSH demo set was thrown out, and the analyst
+    # was offered nothing or the background instead.
     MIN_FOREGROUND_FRACTION = 0.0005
-    MAX_FOREGROUND_FRACTION = 0.35
+    MAX_FOREGROUND_FRACTION = 0.8
 
     # Features must actually differ in brightness from their surroundings by at
     # least this many grey levels. Without it, a mask covering half a frame of
@@ -117,20 +121,28 @@ class ParticleSegmenter:
         often enough to matter. Ranking by contrast (is the enclosed region really
         brighter or darker than the rest?) picks the right one far more reliably.
 
+        Which way the particles differ from the background is a preference, not
+        a filter. A large particle and the background around it are both
+        plausible masks with the same contrast, and only the expected polarity
+        tells them apart, so candidates on the expected side come first. But the
+        other side is still offered after them: a wrong expectation should cost
+        the analyst one click, not leave nothing to choose.
+
         Args:
             image (np.ndarray): The image the masks were generated from.
             masks (np.ndarray, optional): Candidates; defaults to the last set
                 produced by segment_image.
             top_k (int): How many candidates to return.
-            dark_features (bool, optional): True if objects are darker than the
-                background (typical for TEM), False if brighter (typical for SEM
-                particles). Auto-detected when None.
+            dark_features (bool, optional): True if objects are expected to be
+                darker than the background (TEM bright field), False if brighter
+                (most SEM images), None if unknown.
             exclude (np.ndarray, optional): Boolean mask of pixels to blank out
                 before scoring, e.g. a burned-in scale bar.
 
         Returns:
             list[dict]: Ordered best-first, each with keys ``mask``,
-            ``mask_index``, ``inverted``, ``fraction``, ``contrast`` and ``score``.
+            ``mask_index``, ``inverted``, ``fraction``, ``contrast``, ``darker``
+            and ``score``.
         """
         if masks is None:
             masks = self.masks
@@ -159,12 +171,7 @@ class ParticleSegmenter:
                 inside = grey[candidate].mean()
                 outside = grey[~candidate].mean()
                 difference = outside - inside  # positive when features are darker
-
-                if dark_features is None:
-                    contrast = abs(difference)
-                else:
-                    contrast = difference if dark_features else -difference
-                if contrast < self.MIN_CONTRAST:
+                if abs(difference) < self.MIN_CONTRAST:
                     continue
 
                 candidates.append({
@@ -172,11 +179,18 @@ class ParticleSegmenter:
                     "mask_index": index,
                     "inverted": inverted,
                     "fraction": fraction,
-                    "contrast": float(contrast),
+                    "contrast": float(abs(difference)),
+                    "darker": bool(difference > 0),
                     "score": float(self.scores[index]) if self.scores is not None else None,
                 })
 
-        candidates.sort(key=lambda c: c["contrast"], reverse=True)
+        def order(candidate):
+            expected = dark_features is None or candidate["darker"] == dark_features
+            # A mask and its complement have the same contrast; with nothing else
+            # to go on, the smaller side is the likelier to be the particles.
+            return (not expected, -candidate["contrast"], candidate["fraction"])
+
+        candidates.sort(key=order)
         return candidates[:top_k]
 
     def select_mask(self, mask_index=None):

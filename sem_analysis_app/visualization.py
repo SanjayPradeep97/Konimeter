@@ -31,6 +31,47 @@ def create_mask_overlay(image, mask, color=(255, 0, 0), alpha=0.5):
     return overlay
 
 
+# The working image is shown in a box about 760px tall. Gradio shrinks a larger
+# frame to fit but never enlarges a smaller one, so a 512px frame sat small and
+# soft in the middle of a black box. Such frames are enlarged here instead, by a
+# whole number so a click maps back to exactly one pixel (handle_image_click
+# divides by display_factor). Gradio's click coordinates assume no enlargement,
+# which is why this cannot be left to CSS.
+DISPLAY_MIN_PX = 900
+
+
+def display_factor(shape):
+    """How many times a frame of this shape is enlarged for the working view."""
+    longest = max(shape[:2])
+    return max(1, -(-DISPLAY_MIN_PX // longest)) if longest else 1
+
+
+def for_display(image):
+    """The working view of ``image``: enlarged by display_factor, pixels kept sharp."""
+    if image is None:
+        return None
+    factor = display_factor(image.shape)
+    if factor == 1:
+        return image
+    return cv2.resize(image, None, fx=factor, fy=factor, interpolation=cv2.INTER_NEAREST)
+
+
+def _drawing_sizes(shape):
+    """
+    Line width and label size that read the same on screen whatever the frame
+    size. A 2048px frame is shown at about a third of its size, so fixed sizes
+    left its particle numbers a few screen pixels tall.
+    """
+    size = max(shape[:2]) / 1000.0
+    font_scale = max(0.6, 0.75 * size)
+    return {
+        "line": max(2, round(2 * size)),
+        "font_scale": font_scale,
+        "text": max(2, round(2 * font_scale)),
+        "marker": max(20, round(20 * size)),
+    }
+
+
 def create_particle_visualization(image, labeled_mask, regions, show_labels=True,
                                  pending_deletes=None, pending_add_masks=None, pending_merge=None):
     """
@@ -50,6 +91,7 @@ def create_particle_visualization(image, labeled_mask, regions, show_labels=True
     """
     # Create a copy to draw on
     vis_image = image.copy()
+    sizes = _drawing_sizes(image.shape)
 
     pending_deletes = pending_deletes or []
     pending_add_masks = pending_add_masks or []
@@ -72,13 +114,13 @@ def create_particle_visualization(image, labeled_mask, regions, show_labels=True
         # Choose color based on status
         if region.label in pending_deletes:
             color = (255, 255, 0)  # Yellow for pending deletion
-            thickness = 4
+            thickness = 2 * sizes["line"]
         elif region.label in pending_merge:
             color = (0, 0, 255)  # Blue for pending merge
-            thickness = 4
+            thickness = 2 * sizes["line"]
         else:
             color = (255, 0, 0)  # Red for normal
-            thickness = 2
+            thickness = sizes["line"]
 
         # Draw contours
         cv2.drawContours(vis_image, contours, -1, color, thickness)
@@ -90,8 +132,8 @@ def create_particle_visualization(image, labeled_mask, regions, show_labels=True
             # Draw text background
             text = str(idx)
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.6
-            text_thickness = 2
+            font_scale = sizes["font_scale"]
+            text_thickness = sizes["text"]
 
             (text_w, text_h), _ = cv2.getTextSize(text, font, font_scale, text_thickness)
 
@@ -111,9 +153,9 @@ def create_particle_visualization(image, labeled_mask, regions, show_labels=True
         if add_mask is not None and add_mask.any():
             mask_uint8 = add_mask.astype(np.uint8)
             contours, _ = cv2.findContours(mask_uint8, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
-            cv2.drawContours(vis_image, contours, -1, (0, 255, 0), 4)  # Green, thick
+            cv2.drawContours(vis_image, contours, -1, (0, 255, 0), 2 * sizes["line"])
 
-    return vis_image
+    return for_display(vis_image)
 
 
 def create_point_refine_visualization(image, refined_mask, point_coords, point_labels):
@@ -130,12 +172,13 @@ def create_point_refine_visualization(image, refined_mask, point_coords, point_l
         np.ndarray: Annotated image with mask and point markers
     """
     vis_image = image.copy()
+    sizes = _drawing_sizes(image.shape)
 
     # Draw the refined mask contour in white
     if refined_mask is not None and refined_mask.any():
         mask_uint8 = refined_mask.astype(np.uint8)
         contours, _ = cv2.findContours(mask_uint8, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(vis_image, contours, -1, (255, 255, 255), 3)  # White thick outline
+        cv2.drawContours(vis_image, contours, -1, (255, 255, 255), sizes["line"] + 1)
 
     # Draw point markers
     for (x, y), label in zip(point_coords, point_labels):
@@ -143,13 +186,15 @@ def create_point_refine_visualization(image, refined_mask, point_coords, point_l
         if label == 1:
             # Positive point: Green + marker
             cv2.drawMarker(vis_image, (x_int, y_int), (0, 255, 0),
-                          markerType=cv2.MARKER_CROSS, markerSize=20, thickness=3)
+                          markerType=cv2.MARKER_CROSS, markerSize=sizes["marker"],
+                          thickness=sizes["line"] + 1)
         else:
             # Negative point: Red × marker
             cv2.drawMarker(vis_image, (x_int, y_int), (255, 0, 0),
-                          markerType=cv2.MARKER_TILTED_CROSS, markerSize=20, thickness=3)
+                          markerType=cv2.MARKER_TILTED_CROSS, markerSize=sizes["marker"],
+                          thickness=sizes["line"] + 1)
 
-    return vis_image
+    return for_display(vis_image)
 
 
 def visualize_three_masks(image, masks, labels):
@@ -281,12 +326,50 @@ def create_summary_statistics_table(measurements):
     return pd.DataFrame(stats_data)
 
 
-def create_histogram_plots(measurements):
+def _histogram(ax, values, label, colour, log_scale):
+    """
+    One size distribution on one axis.
+
+    On a log axis the bins are spaced evenly in log, so each bin covers the same
+    ratio of sizes, and the box gives the geometric mean and geometric standard
+    deviation, the usual summary of a particle size distribution.
+    """
+    values = np.asarray(values, dtype=float)
+    bins = min(30, len(values))
+    positive = values[values > 0]
+    if log_scale and len(positive):
+        low, high = positive.min(), positive.max()
+        if high > low:
+            bins = np.geomspace(low, high, bins + 1)
+        ax.hist(positive, bins=bins, color=colour, edgecolor='black', alpha=0.7)
+        ax.set_xscale('log')
+        logs = np.log(positive)
+        stats = (f'Geometric mean: {np.exp(logs.mean()):.3g}\n'
+                 f'GSD: {np.exp(logs.std()):.2f}\n'
+                 f'Median: {np.median(positive):.3g}')
+    else:
+        ax.hist(values, bins=bins, color=colour, edgecolor='black', alpha=0.7)
+        stats = (f'Mean: {np.mean(values):.3g}\nMedian: {np.median(values):.3g}\n'
+                 f'Std: {np.std(values):.3g}')
+    ax.set_xlabel(label + (' (log scale)' if log_scale else ''), fontsize=12,
+                  fontweight='bold')
+    ax.set_ylabel('Frequency', fontsize=12, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+    ax.text(0.98, 0.98, stats, transform=ax.transAxes,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+            fontsize=10)
+
+
+def create_histogram_plots(measurements, log_scale=False):
     """
     Create histograms for particle size distribution.
 
     Args:
         measurements (dict): Measurements from ParticleAnalyzer
+        log_scale (bool): Log size axis. Particle sizes usually span orders of
+            magnitude, and on a linear axis one large particle crowds every
+            other into the first bar.
 
     Returns:
         np.ndarray: Combined histogram image
@@ -309,33 +392,12 @@ def create_histogram_plots(measurements):
     # Create figure with 2 subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
-    # Area histogram
-    ax1.hist(areas, bins=min(30, len(areas)), color='steelblue', edgecolor='black', alpha=0.7)
-    ax1.set_xlabel(f'Particle Area ({unit}²)', fontsize=12, fontweight='bold')
-    ax1.set_ylabel('Frequency', fontsize=12, fontweight='bold')
+    _histogram(ax1, areas, f'Particle Area ({unit}²)', 'steelblue', log_scale)
     ax1.set_title(f'Particle Area Distribution\n(n={len(areas)})', fontsize=14, fontweight='bold')
-    ax1.grid(axis='y', alpha=0.3)
 
-    # Add statistics text
-    stats_text = f'Mean: {np.mean(areas):.1f}\nMedian: {np.median(areas):.1f}\nStd: {np.std(areas):.1f}'
-    ax1.text(0.98, 0.98, stats_text, transform=ax1.transAxes,
-             verticalalignment='top', horizontalalignment='right',
-             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
-             fontsize=10)
-
-    # Diameter histogram
-    ax2.hist(diameters, bins=min(30, len(diameters)), color='coral', edgecolor='black', alpha=0.7)
-    ax2.set_xlabel(f'Equivalent Diameter ({unit})', fontsize=12, fontweight='bold')
-    ax2.set_ylabel('Frequency', fontsize=12, fontweight='bold')
-    ax2.set_title(f'Particle Diameter Distribution\n(n={len(diameters)})', fontsize=14, fontweight='bold')
-    ax2.grid(axis='y', alpha=0.3)
-
-    # Add statistics text
-    stats_text = f'Mean: {np.mean(diameters):.1f}\nMedian: {np.median(diameters):.1f}\nStd: {np.std(diameters):.1f}'
-    ax2.text(0.98, 0.98, stats_text, transform=ax2.transAxes,
-             verticalalignment='top', horizontalalignment='right',
-             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
-             fontsize=10)
+    _histogram(ax2, diameters, f'Equivalent Diameter ({unit})', 'coral', log_scale)
+    ax2.set_title(f'Particle Diameter Distribution\n(n={len(diameters)})', fontsize=14,
+                  fontweight='bold')
 
     plt.tight_layout()
 

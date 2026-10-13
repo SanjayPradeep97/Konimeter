@@ -70,19 +70,17 @@ class TestFromMetadata:
 
 
 class TestFromAppearance:
-    def test_a_databar_means_a_scanning_instrument(self):
-        image = np.zeros((1094, 1536), dtype=np.uint8)
-        found = mod.from_appearance(image, databar_height=70)
-        assert found.kind == mod.SEM
+    def test_a_square_frame_reads_as_tem(self):
+        image = np.zeros((1024, 1024), dtype=np.uint8)
+        found = mod.from_appearance(image)
+        assert found.kind == mod.TEM
         assert found.from_metadata is False
 
-    def test_a_bare_square_frame_reads_as_tem(self):
-        image = np.zeros((1024, 1024), dtype=np.uint8)
-        assert mod.from_appearance(image, databar_height=0).kind == mod.TEM
-
-    def test_a_bare_rectangular_frame_stays_unknown(self):
-        image = np.zeros((768, 1024), dtype=np.uint8)
-        assert mod.from_appearance(image, databar_height=0).kind == mod.UNKNOWN
+    def test_a_rectangular_frame_stays_unknown(self):
+        # Including one with a databar: some TEMs write one too, and shading at
+        # the bottom of a TEM frame was once taken for one, making it "SEM".
+        image = np.zeros((1094, 1536), dtype=np.uint8)
+        assert mod.from_appearance(image).kind == mod.UNKNOWN
 
 
 class TestDetect:
@@ -95,7 +93,7 @@ class TestDetect:
 
     def test_appearance_fills_in_when_metadata_is_silent(self):
         image = np.zeros((2048, 2048), dtype=np.uint8)
-        found = mod.detect(image, metadata=tags(), databar_height=0)
+        found = mod.detect(image, metadata=tags())
         assert found.kind == mod.TEM
         assert found.from_metadata is False
         assert "inferred" in found.detail

@@ -141,11 +141,14 @@
     });
 
     if (!S.spanLabel) return;
-    const mx = (ends[0][0] + ends[1][0]) / 2;
-    const my = Math.min(ends[0][1], ends[1][1]) - tick - 6;
     ctx.save();
     ctx.font = "bold 12px ui-monospace, monospace";
     const w = ctx.measureText(S.spanLabel).width + 10;
+    // Centred over the bar, but kept on the canvas: a bar in the corner put
+    // half its label off the edge.
+    const mx = Math.min(Math.max((ends[0][0] + ends[1][0]) / 2, w / 2 + 2),
+                        ctx.canvas.width - w / 2 - 2);
+    const my = Math.max(Math.min(ends[0][1], ends[1][1]) - tick - 6, 17);
     ctx.fillStyle = "rgba(0,0,0,0.78)";
     ctx.fillRect(mx - w / 2, my - 15, w, 18);
     ctx.fillStyle = "#ff8fa3";
