@@ -121,14 +121,13 @@ class TestSummaries:
     def test_a_log_axis_spaces_bins_by_ratio(self):
         # Sizes over three orders of magnitude: on a linear axis every particle
         # but the largest lands in the first bar.
-        import matplotlib.pyplot as plt
+        from matplotlib.figure import Figure
         from sem_analysis_app.visualization import _histogram
 
         sizes = np.geomspace(10, 10_000, 200)
-        fig, ax = plt.subplots()
+        ax = Figure().subplots()           # no GUI backend involved
         _histogram(ax, sizes, "Diameter (nm)", "coral", log_scale=True)
         heights = [patch.get_height() for patch in ax.patches]
-        plt.close(fig)
         assert ax.get_xscale() == "log"
         assert max(heights) < 0.1 * len(sizes)
 

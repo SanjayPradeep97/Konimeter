@@ -4,7 +4,13 @@ import sys
 import tempfile
 from pathlib import Path
 
+import matplotlib
 import pytest
+
+# As the app does at start-up (sem_analysis_app/__main__.py): plots are drawn
+# off-screen. Left to choose, matplotlib picks a GUI backend, and on a Windows
+# runner whose Tcl install is incomplete the first figure fails to open.
+matplotlib.use("Agg")
 
 # Test helpers live alongside the tests rather than in the installed package.
 sys.path.insert(0, str(Path(__file__).parent))
