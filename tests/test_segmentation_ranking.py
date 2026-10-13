@@ -63,10 +63,19 @@ class TestPolarity:
 
 
 class TestDarkFeaturesHint:
-    def test_dark_features_true_rejects_bright_objects(self, segmenter):
+    """
+    The expected polarity orders the candidates; it never hides any.
+
+    It used to be a filter, and on frames whose instrument was guessed wrong the
+    right outline was thrown away, leaving nothing to choose or only background.
+    """
+
+    def test_a_wrong_expectation_still_offers_the_objects(self, segmenter):
         image, objects = scene(BRIGHT)
-        assert segmenter.rank_candidates(image, np.array([objects]),
-                                         dark_features=True) == []
+        best = segmenter.rank_candidates(image, np.array([objects]),
+                                         dark_features=True)
+        assert best and np.array_equal(best[0]["mask"], objects)
+        assert best[0]["darker"] is False
 
     def test_dark_features_false_accepts_bright_objects(self, segmenter):
         image, objects = scene(BRIGHT)
@@ -80,19 +89,51 @@ class TestDarkFeaturesHint:
                                          dark_features=True)
         assert best and np.array_equal(best[0]["mask"], objects)
 
+    def test_the_expected_side_comes_first_even_at_lower_contrast(self, segmenter):
+        # A large dark particle filling 60% of a bright frame. It and the
+        # background around it are both plausible outlines with the same
+        # contrast; only the expectation can tell them apart.
+        image = np.full((200, 200, 3), BRIGHT, dtype=np.uint8)
+        particle = np.zeros((200, 200), dtype=bool)
+        particle[:, :120] = True
+        image[particle] = DARK
+        dark_first = segmenter.rank_candidates(image, np.array([particle]),
+                                               dark_features=True)
+        bright_first = segmenter.rank_candidates(image, np.array([particle]),
+                                                 dark_features=False)
+        assert np.array_equal(dark_first[0]["mask"], particle)
+        assert np.array_equal(bright_first[0]["mask"], ~particle)
+        # Both sides are offered either way round.
+        assert len(dark_first) == len(bright_first) == 2
+
+    def test_without_an_expectation_the_smaller_side_comes_first(self, segmenter):
+        image = np.full((200, 200, 3), BRIGHT, dtype=np.uint8)
+        particle = np.zeros((200, 200), dtype=bool)
+        particle[:, :70] = True                 # 35% of the frame
+        image[particle] = DARK
+        ranked = segmenter.rank_candidates(image, np.array([~particle]))
+        assert np.array_equal(ranked[0]["mask"], particle)
+
 
 class TestPlausibilityFilters:
-    def test_rejects_a_candidate_covering_half_the_frame(self, segmenter):
-        # A mask splitting the frame down the middle is out of the plausible band
-        # whichever way round it is read: both it and its inverse cover 0.5, well
-        # above MAX_FOREGROUND_FRACTION. Contrast cannot rescue either polarity,
-        # so nothing should be offered.
+    def test_a_particle_filling_most_of_the_frame_is_offered(self, segmenter):
+        # At a 35% ceiling every large aggregate in the NIOSH demo set was
+        # thrown out, and the analyst was offered nothing or the background.
+        image = np.full((200, 200, 3), BRIGHT, dtype=np.uint8)
+        particle = np.zeros((200, 200), dtype=bool)
+        particle[10:180, 10:180] = True          # 72% of the frame
+        image[particle] = DARK
+        ranked = segmenter.rank_candidates(image, np.array([particle]),
+                                           dark_features=True)
+        assert ranked and np.array_equal(ranked[0]["mask"], particle)
+
+    def test_a_mask_covering_almost_everything_is_read_as_its_complement(self, segmenter):
         image = np.full((200, 200, 3), BACKGROUND, dtype=np.uint8)
-        half = np.zeros((200, 200), dtype=bool)
-        half[:100, :] = True
-        image[half] = BRIGHT
-        assert 0.5 > segmenter.MAX_FOREGROUND_FRACTION
-        assert segmenter.rank_candidates(image, np.array([half])) == []
+        nearly_all = np.ones((200, 200), dtype=bool)
+        nearly_all[90:110, 90:110] = False      # a 1% particle; the rest is 99%
+        image[~nearly_all] = BRIGHT
+        ranked = segmenter.rank_candidates(image, np.array([nearly_all]))
+        assert len(ranked) == 1 and ranked[0]["inverted"] is True
 
     def test_a_large_mask_is_read_as_its_smaller_complement(self, segmenter):
         # 90% foreground is implausible, but its 10% complement is not — and here

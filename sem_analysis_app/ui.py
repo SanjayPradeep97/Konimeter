@@ -19,6 +19,7 @@ from .callbacks import (
     initialize_sam,
     load_images_from_folder,
     restore_session,
+    restore_scale_tab,
     restore_setup,
     current_save_dataset,
     set_save_dataset,
@@ -35,11 +36,11 @@ from .callbacks import (
     clear_scale,
     confirm_scale,
     frame_header,
+    frame_summary,
     live_point_readout,
     read_box_scale,
     set_canvas_mode,
     set_crop_override,
-    set_modality,
     set_particle_polarity,
     # segmentation + refinement
     segment_with_sam,
@@ -57,6 +58,7 @@ from .callbacks import (
     undo_last_action,
     # workflow
     open_current_image,
+    restore_working_tab,
     save_and_next,
     skip_to_next,
     # results
@@ -132,7 +134,10 @@ def create_interface():
     Theme and CSS are applied at launch (see __main__), which is where Gradio 6
     expects them; passing them to Blocks is deprecated.
     """
-    with gr.Blocks(title="Konimeter") as app:
+    # Gradio keeps a copy of every image it shows in the system temp folder.
+    # These are micrographs, often unpublished: delete the copies an hour after
+    # they are made (checked hourly), and any left over when the app next starts.
+    with gr.Blocks(title="Konimeter", delete_cache=(3600, 3600)) as app:
 
         gr.Markdown("# 🔬 Konimeter · particle analysis for SEM & TEM")
         gr.Markdown(
@@ -251,25 +256,17 @@ def create_interface():
                     confirm_scale_btn = gr.Button("✔️ Confirm scale", variant="primary")
                     clear_scale_btn = gr.Button("✖️ Clear", variant="secondary")
 
-                with gr.Accordion("🔬 Frame — instrument, polarity, analysable area",
+                with gr.Accordion("🔬 Frame — instrument, databar, analysable area",
                                   open=True):
                     gr.Markdown(
-                        "SEM and TEM need opposite handling. The instrument is "
-                        "read from the file where it says so. Beam-blocked area — "
-                        "an aperture vignette, a grid bar — and any burned-in "
-                        "scale bar are left out of measurement, because they "
-                        "out-contrast the particles and would be counted instead."
+                        "The instrument is read from the file where it says so. "
+                        "An information strip (databar) below the image is cut "
+                        "off. Beam-blocked area — an aperture vignette, a grid "
+                        "bar — and any burned-in scale bar are left out of "
+                        "measurement, because they out-contrast the particles "
+                        "and would be counted instead."
                     )
                     with gr.Row():
-                        modality_choice = gr.Dropdown(
-                            choices=["auto", "SEM", "TEM"], value="auto",
-                            label="Instrument", scale=1,
-                        )
-                        particle_choice = gr.Dropdown(
-                            choices=["auto", "bright", "dark"], value="auto",
-                            label="Particles are", scale=1,
-                            info="auto follows the instrument",
-                        )
                         with gr.Column(scale=1):
                             # Off by default and hiding its input: an always-on
                             # number field shows 0, and 0 means "keep the whole
@@ -388,6 +385,13 @@ def create_interface():
                             minimum=5, maximum=200, value=30, step=1,
                             label="Smallest particle (px)",
                             info="Anything below this is noise",
+                        )
+                        particle_choice = gr.Radio(
+                            choices=[("Auto", "auto"), ("Darker", "dark"),
+                                     ("Brighter", "bright")],
+                            value="auto", label="Particles are",
+                            info="…than the background. Usually darker in TEM, "
+                                 "brighter in SEM. Auto reads the file",
                         )
                         segment_btn = gr.Button("🤖 Segment", variant="primary")
                         mask_choice = gr.Radio(
@@ -517,6 +521,9 @@ def create_interface():
                 gr.Markdown("Size distribution across everything saved this session.")
                 with gr.Row():
                     update_plots_btn = gr.Button("🔄 Update", variant="primary")
+                    plot_axis = gr.Radio(["Log", "Linear"], value="Log",
+                                         label="Size axis",
+                                         info="Log suits sizes spanning orders of magnitude")
                     plot_status = gr.Textbox(label="", interactive=False,
                                              show_label=False)
                 histogram_plot = gr.Image(label="", type="numpy", show_label=False)
@@ -530,7 +537,7 @@ def create_interface():
         # points cannot drift apart.
         OPEN_OUTPUTS = [scale_image_in, tier1_status, scale_summary, point_readout,
                         frame_status, header, mask_viz, segment_status, mask_choice,
-                        click_mode_radio, point_type_radio]
+                        click_mode_radio, point_type_radio, refine_viz]
         RELOAD_CANVAS = "() => { window.SCALE && window.SCALE.load(); }"
 
         # Everything that shows what the scale is and how much it should be
@@ -567,8 +574,18 @@ def create_interface():
         app.load(restore_setup,
                  outputs=[sam_file, download_btn, init_sam_btn, init_status, load_btn])
         app.load(current_frame_controls,
-                 outputs=[modality_choice, particle_choice, crop_manual, crop_override,
+                 outputs=[particle_choice, crop_manual, crop_override,
                           min_particle_size_slider])
+        # The image being worked on, as it was: its scale and canvas, its
+        # candidates, its outlines. Nothing is detected or segmented again.
+        app.load(restore_scale_tab,
+                 outputs=[scale_image_in, tier1_status, scale_summary, point_readout,
+                          frame_status]
+                 ).then(lambda: check_outputs()[:-1] + (gr.update(),),
+                        outputs=CHECK_OUTPUTS).then(None, js=RELOAD_CANVAS)
+        app.load(restore_working_tab,
+                 outputs=[mask_viz, segment_status, mask_choice, refine_viz,
+                          refine_results, header, candidate_panel])
 
         # ---- Gallery ----
         gallery.select(
@@ -622,14 +639,6 @@ def create_interface():
             accept_from_work_tab,
             outputs=CHECK_OUTPUTS + [header, scale_summary])
 
-        # An override re-derives the frame's geometry, since the instrument
-        # decides whether a databar is expected and which way round particles are.
-        modality_choice.change(set_modality, inputs=[modality_choice],
-                               outputs=[frame_status]).then(frame_header,
-                                                            outputs=[header])
-        particle_choice.change(set_particle_polarity, inputs=[particle_choice],
-                               outputs=[frame_status]).then(frame_header,
-                                                            outputs=[header])
         def _toggle_crop(manual):
             """Show the trim field only while the override is on; off returns to
             measuring the databar straight away rather than waiting for Apply."""
@@ -647,6 +656,12 @@ def create_interface():
         min_particle_size_slider.change(set_min_particle_size,
                                         inputs=[min_particle_size_slider],
                                         outputs=[segment_status])
+        # Re-sorts SAM's existing outlines; nothing is re-run. .input, not
+        # .change: restoring the choice on a page load must not re-sort.
+        particle_choice.input(set_particle_polarity, inputs=[particle_choice],
+                              outputs=[mask_viz, segment_status, mask_choice]
+                              ).then(frame_summary, outputs=[frame_status]).then(
+            lambda: gr.update(open=True), outputs=[candidate_panel])
         segment_btn.click(
             segment_with_sam, outputs=[mask_viz, segment_status, mask_choice],
         ).then(  # new candidates to look at, so open the panel again
@@ -724,8 +739,10 @@ def create_interface():
         export_btn.click(export_results, outputs=[export_file, export_status])
 
         # ---- Plots ----
-        update_plots_btn.click(update_histogram_plots,
+        update_plots_btn.click(update_histogram_plots, inputs=[plot_axis],
                                outputs=[histogram_plot, plot_status])
+        plot_axis.change(update_histogram_plots, inputs=[plot_axis],
+                         outputs=[histogram_plot, plot_status])
 
     # Every callback reads and writes the one process-wide state, so they run one
     # at a time. In separate queues, a gallery click during Save & next's

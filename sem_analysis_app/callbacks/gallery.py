@@ -7,6 +7,7 @@ from PIL import Image
 
 from sem_particle_analysis.utils import load_image
 from ..state import state
+from ..visualization import for_display
 
 # Gallery tiles are ~200px on screen; anything larger is wasted bytes.
 THUMBNAIL_PX = (320, 320)
@@ -80,7 +81,7 @@ def select_image_from_gallery(evt: gr.SelectData):
         state.current_image = load_image(state.image_paths[state.current_index])
         filename = os.path.basename(state.image_paths[state.current_index])
         info = f"Image {state.current_index + 1} / {len(state.image_paths)}: {filename}"
-        return state.current_image, info, gr.Tabs(selected=2), "delete"
+        return for_display(state.current_image), info, gr.Tabs(selected=2), "delete"
     except Exception as e:
         return None, f"❌ Error loading image: {str(e)}", gr.Tabs(selected=1), "delete"
 

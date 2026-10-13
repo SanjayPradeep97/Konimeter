@@ -147,33 +147,31 @@ def from_metadata(metadata):
     return Modality(detail="metadata names no instrument")
 
 
-def from_appearance(image, databar_height=0):
+def from_appearance(image):
     """
     Guess the kind from how the frame looks, for files whose metadata is silent.
 
-    Weak evidence deliberately reported as such: an appended databar means a
-    scanning instrument wrote it, and a bare square frame is characteristic of a
-    TEM camera readout. Anything else stays unknown rather than being guessed.
+    Weak evidence, deliberately reported as such. A bare square frame is
+    characteristic of a TEM camera readout; anything else stays unknown rather
+    than being guessed. A databar is not taken as evidence either way: some TEMs
+    write one too, and gradual shading at the bottom of a TEM frame was once
+    mistaken for one, which made the frame "SEM" and its particles "brighter".
 
     Args:
-        image (np.ndarray): The full frame, databar included.
-        databar_height (int): Rows of databar found, 0 if none.
+        image (np.ndarray): The full frame.
 
     Returns:
         Modality: Never ``from_metadata``.
     """
-    if databar_height > 0:
-        return Modality(kind=SEM, detail=f"{databar_height}px databar below the image")
-
     height, width = image.shape[:2]
     if height == width:
         return Modality(kind=TEM,
-                        detail=f"square {width}px frame with no databar")
+                        detail=f"square {width}px frame, typical of a TEM camera")
 
-    return Modality(detail="no databar and a non-square frame")
+    return Modality(detail="a non-square frame")
 
 
-def detect(image, metadata=None, databar_height=0):
+def detect(image, metadata=None):
     """
     Best available reading of a frame's instrument kind.
 
@@ -186,10 +184,10 @@ def detect(image, metadata=None, databar_height=0):
     if stated.kind != UNKNOWN:
         return stated
 
-    guessed = from_appearance(image, databar_height=databar_height)
+    guessed = from_appearance(image)
     if guessed.kind != UNKNOWN:
         return Modality(kind=guessed.kind, instrument=None,
-                        detail=f"{stated.detail}; inferred from {guessed.detail}")
+                        detail=f"{stated.detail}; inferred from a {guessed.detail}")
     return Modality(detail=f"{stated.detail}; {guessed.detail}")
 
 

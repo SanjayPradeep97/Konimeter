@@ -142,6 +142,19 @@ class TestCasesFromTheRealInstruments:
         # set it would have removed up to 13% of nine frames.
         assert detector.detect_databar(make_grid_bar_frame())["has_databar"] is False
 
+    def test_background_shading_towards_the_bottom_is_not_a_databar(self, detector):
+        # Uneven illumination leaves the bottom of a TEM frame a little darker
+        # and featureless. It passes every other test, and on four NIOSH frames
+        # was cropped off with 5-9% of the micrograph; what it lacks is a step.
+        image = np.full((1040, 1350, 3), 200, dtype=np.uint8)
+        image[:900] = 210
+        rows = np.linspace(210, 180, 140).astype(np.uint8)
+        image[900:] = rows[:, None, None]
+        rng = np.random.default_rng(1)
+        noisy = np.clip(image + rng.normal(0, 4, image.shape), 0, 255).astype(np.uint8)
+        noisy[:600, 300:400] = 40          # a particle well above, for contrast
+        assert detector.detect_databar(noisy)["has_databar"] is False
+
     def test_a_burned_in_scale_bar_frame_has_no_databar(self, detector):
         # TEM frames carry the bar inside the image; there is no strip to trim.
         image, _ = make_burnin_micrograph()

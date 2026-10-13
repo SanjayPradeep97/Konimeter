@@ -103,9 +103,9 @@ OpenMP runtime and otherwise refuse to share a process.
 | ⚙️ Setup | Load the SAM model (the first time, download it with the button there), then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it |
 | 🖼️ Gallery | Pick an image. Ticked images already have saved results |
 | 📏 Scale & Frame | Establish the scale, and check what the app decided about the image (see below) |
-| 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include/exclude clicks. Every click and every applied change can be undone |
+| 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include/exclude clicks. Every click and every applied change can be undone. *Particles are* (darker / brighter than the background) sets which candidates come first |
 | 💾 Results | The measurements per image, and the whole folder's results: delete rows, remove duplicates, export |
-| 📊 Plots | Size distributions across everything saved |
+| 📊 Plots | Size distributions across everything saved, on a log or linear size axis. On log, with the geometric mean and geometric standard deviation |
 
 The app keeps one process-wide session, so it is built for one analyst at a time;
 two browser tabs pointed at the same server share it.
@@ -128,19 +128,25 @@ machine reading a glyph. The result is shown as "X nm/px · how it was obtained"
 and is what segmentation and the results file use; how the scale was obtained is
 recorded beside every row in the `scale_method` column.
 
-### SEM and TEM
+### Darker or brighter particles
 
-The two need opposite handling, and the app works out which it is looking at from
-the file:
+SAM proposes outlines for both what stands out dark and what stands out bright,
+and the app has to put the right one first. With small particles that is easy;
+with a large one, the particle and the background around it are equally
+plausible, and only knowing which way round the image is settles it.
 
-| | SEM | TEM |
-| --- | --- | --- |
-| Instrument read from | FEI / Zeiss / Hitachi / TESCAN tags | JEOL mode tag, else frame shape |
-| Information strip (databar) | detected and cropped off | none — frame kept whole |
-| Scale bar | in the databar | burned into the frame, so its patch is excluded from measurement |
-| Particles are | **brighter** than the substrate | **darker** than the support film |
+That is what **Particles are** on the Segment & Refine tab says: *darker* than
+the background (TEM bright field, the usual case), *brighter* (most SEM images), or
+*Auto*. Auto goes by the file: FEI and JEOL files name the instrument, Zeiss,
+Hitachi and TESCAN files are SEM, and a square frame with no metadata is taken to
+be from a TEM camera. Otherwise Auto puts first whichever side stands out more.
+The choice only orders the candidates — the other side is still offered after
+them — and it is kept for every image until you change it, so set it once per
+folder. The Scale & Frame tab shows what the file said and what is expected.
 
-Both decisions are shown on the Scale & Frame tab and can be overridden there.
+An information strip (databar) below the image, as most SEMs write, is found and
+cut off. A scale bar burned into the image itself, as on most TEMs, is left out
+of measurement instead.
 
 Micrographs often contain large areas that are not specimen — the black corners
 left by a circular aperture, a grid bar blocking the beam, a burned-in scale bar.

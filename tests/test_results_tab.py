@@ -110,6 +110,28 @@ class TestSummaries:
         _plot, status = update_histogram_plots()
         assert "1 particle from 2 images" in status and "2 more" in status
 
+    @pytest.mark.parametrize("axis", ["Log", "Linear"])
+    def test_sizes_plot_on_either_axis(self, folder, axis):
+        from sem_analysis_app.callbacks.plots import update_histogram_plots
+
+        state.results_manager.add_result("A_0001.tif", measurements(3))
+        plot, status = update_histogram_plots(axis)
+        assert status.startswith("✅") and plot.ndim == 3
+
+    def test_a_log_axis_spaces_bins_by_ratio(self):
+        # Sizes over three orders of magnitude: on a linear axis every particle
+        # but the largest lands in the first bar.
+        import matplotlib.pyplot as plt
+        from sem_analysis_app.visualization import _histogram
+
+        sizes = np.geomspace(10, 10_000, 200)
+        fig, ax = plt.subplots()
+        _histogram(ax, sizes, "Diameter (nm)", "coral", log_scale=True)
+        heights = [patch.get_height() for patch in ax.patches]
+        plt.close(fig)
+        assert ax.get_xscale() == "log"
+        assert max(heights) < 0.1 * len(sizes)
+
     def test_a_failed_save_leaves_the_gallery_alone(self, folder):
         # Returning None emptied the gallery, which looks like the work was lost.
         from sem_analysis_app.callbacks.results import save_current_results

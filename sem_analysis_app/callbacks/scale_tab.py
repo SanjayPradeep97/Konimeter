@@ -148,11 +148,9 @@ def _apply_frame_geometry(calibration):
         state.crop_percent = 0.0
         state.scale_bar_region = _bar_region(calibration)
 
-    # Which instrument this is decides particle polarity, and an analyst's
-    # explicit choice always wins over what the file says.
-    state.modality = (modality.resolve(state.modality_choice)
-                      or modality.detect(image, metadata=_raw_metadata(),
-                                         databar_height=bar_height))
+    # Which instrument this is sets which way round the particles are expected
+    # to be, unless the analyst has said (state.particle_choice).
+    state.modality = modality.detect(image, metadata=_raw_metadata())
 
     # Everything in the frame that is not specimen — beam-blocked area, and the
     # scale bar when it is printed inside the image. Left out of segmentation, so
@@ -195,18 +193,20 @@ def frame_summary():
     if kind is None:
         return "Load an image to detect the instrument."
 
-    source = "from the file" if kind.from_metadata else "inferred"
-    if state.modality_choice != "auto":
-        source = "set by hand"
-    lines = [f"**{kind.label}** ({source}) — {kind.detail}"]
+    if kind.kind == modality.UNKNOWN:
+        lines = [f"**Instrument not known** — {kind.detail}"]
+    else:
+        source = "from the file" if kind.from_metadata else "a guess"
+        lines = [f"**{kind.label}** ({source}) — {kind.detail}"]
 
-    polarity = {None: "brighter or darker, decided by contrast",
-                False: "brighter than the background",
-                True: "darker than the background"}
+    polarity = {None: "either darker or brighter, whichever stands out more",
+                False: "**brighter** than the background",
+                True: "**darker** than the background"}
     choice = state.particle_choice
     resolved = (POLARITY_CHOICES[choice] if choice != "auto" else kind.dark_particles)
-    lines.append(f"Particles are **{polarity[resolved]}**"
-                 + ("" if choice == "auto" else " (set by hand)"))
+    lines.append(f"Particles expected to be {polarity[resolved]}"
+                 + (" (set by you)" if choice != "auto" else "")
+                 + ". Change it under *Particles are* on the Segment & Refine tab.")
 
     info = getattr(state, "region_info", None) or {}
     blocked = 1 - info.get("analysable_fraction", 1.0)
@@ -291,20 +291,6 @@ def clear_crop_override():
     return set_crop_override(None)
 
 
-def set_modality(choice):
-    """Override which instrument the frame is treated as, and re-derive geometry."""
-    state.modality_choice = choice or "auto"
-    if state.current_image is not None:
-        _apply_frame_geometry(getattr(state, "scale_calibration", None))
-    return frame_summary()
-
-
-def set_particle_polarity(choice):
-    """Override which side of the frame holds the particles."""
-    state.particle_choice = choice or "auto"
-    return frame_summary()
-
-
 def _status_lines():
     """Current calibration rendered for the summary box."""
     cal = getattr(state, "scale_calibration", None)
@@ -320,6 +306,27 @@ def _status_lines():
         lines.append("   Not yet confirmed — check the overlay, then press "
                      "“Confirm scale”.")
     return "\n".join(lines)
+
+
+def restore_scale_tab():
+    """
+    The Scale tab as the session has it, for a browser connecting mid-image.
+
+    Nothing is detected again: a page reload must not replace a scale the
+    analyst set, or cost another OCR pass.
+
+    Returns:
+        tuple: (canvas_payload, tier1_status, summary, points_hint, frame_summary)
+    """
+    if state.current_image is None:
+        return "", "", _status_lines(), "", frame_summary()
+    calibration = getattr(state, "scale_calibration", None)
+    box = sc.search_box(calibration) if calibration is not None else None
+    payload = _image_payload(state.current_image, box)
+    note = ("↻ Reconnected — this is the scale already set for this image."
+            if calibration is not None
+            else "↻ Reconnected — no scale is set for this image yet.")
+    return payload, note, _status_lines(), "", frame_summary()
 
 
 def prepare_scale_tab():
@@ -492,11 +499,11 @@ def current_frame_controls():
     while the session goes on using what the analyst set.
 
     Returns:
-        tuple: (instrument, particle polarity, trim override on, trim percent,
+        tuple: (particle polarity, trim override on, trim percent,
         smallest particle)
     """
     override = state.crop_override
-    return (state.modality_choice or "auto", state.particle_choice or "auto",
+    return (state.particle_choice or "auto",
             override is not None, override or 0, state.min_particle_size)
 
 

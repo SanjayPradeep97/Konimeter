@@ -243,7 +243,12 @@ class TestAParticleWithAHoleIsDrawnWithIt:
         return (distance <= outer) & (distance >= inner), distance
 
     def drawn(self, image):
-        """Pixels carrying the outline colour."""
+        """Pixels carrying the outline colour, back at frame size (the working
+        view enlarges small frames by a whole number)."""
+        from sem_analysis_app.visualization import display_factor
+
+        step = display_factor((200, 200))
+        image = image[::step, ::step]
         return ((image[..., 0] > 200) & (image[..., 1] < 60) & (image[..., 2] < 60))
 
     def test_the_hole_gets_an_outline(self):

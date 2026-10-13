@@ -139,6 +139,12 @@ class ScaleDetector:
     # the NIOSH set, real FEI databars give a top-row standard deviation of 5.9
     # and grid bars 87–111, so this sits well clear of both.
     DATABAR_EDGE_ROW_STD = 25.0
+    # ...and the brightness steps at that edge, from one row to the next. Plain
+    # background that darkens or lightens gradually towards the bottom of a frame
+    # passes every other test here, and on four NIOSH TEM frames was cropped off
+    # as a "databar", 5-9% of the micrograph with it. Their edges stepped by 0-2
+    # grey levels; a drawn bar steps by tens.
+    DATABAR_MIN_EDGE_STEP = 12.0
 
     # Registry for custom tag parsers (extensibility for new microscope formats)
     # Format: {tag_code: [(parser_func, manufacturer_name), ...]}
@@ -1454,6 +1460,13 @@ class ScaleDetector:
         # than only the first tolerates a divider rule along the very top.
         edge_rows = gray[H - height:H - height + 2].astype(float)
         if edge_rows.std(axis=1).min() > self.DATABAR_EDGE_ROW_STD:
+            return result
+
+        # A drawn edge is a step, not a slope: compare the rows just above it
+        # with the rows just below.
+        above_edge = np.median(row_medians[max(0, H - height - 3):H - height])
+        below_edge = np.median(row_medians[H - height:H - height + 3])
+        if abs(above_edge - below_edge) < self.DATABAR_MIN_EDGE_STEP:
             return result
 
         result['has_databar'] = True
