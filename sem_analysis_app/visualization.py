@@ -7,6 +7,12 @@ Provides image overlay and plotting functions optimized for Gradio display.
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
+from matplotlib.ticker import FixedLocator, FuncFormatter, LogLocator, NullFormatter
+
+# Axis numbers as people write them — 200, not 2×10².
+_PLAIN = FuncFormatter(lambda value, _position: f"{value:g}")
 
 
 def create_mask_overlay(image, mask, color=(255, 0, 0), alpha=0.5):
@@ -272,8 +278,10 @@ def create_results_dataframe(measurements):
     import pandas as pd
 
     area, diameter = _column_names(measurements)
+    ratios = measurements.get('aspect_ratios')
+    columns = ['Particle ID', area, diameter] + (['Aspect ratio'] if ratios is not None else [])
     if measurements['num_particles'] == 0:
-        return pd.DataFrame(columns=['Particle ID', area, diameter])
+        return pd.DataFrame(columns=columns)
 
     # Create DataFrame
     data = {
@@ -281,6 +289,8 @@ def create_results_dataframe(measurements):
         area: [f"{a:.1f}" for a in measurements['areas']],
         diameter: [f"{d:.1f}" for d in measurements['diameters']],
     }
+    if ratios is not None:
+        data['Aspect ratio'] = [f"{r:.2f}" for r in ratios]
 
     df = pd.DataFrame(data)
     return df
@@ -322,6 +332,11 @@ def create_summary_statistics_table(measurements):
             f"{np.max(diameters):.1f}"
         ]
     }
+    ratios = measurements.get('aspect_ratios')
+    if ratios:
+        ratios = np.asarray(ratios, dtype=float)
+        stats_data['Aspect ratio'] = [f"{f(ratios):.2f}" for f in
+                                      (np.mean, np.median, np.std, np.min, np.max)]
 
     return pd.DataFrame(stats_data)
 
@@ -343,6 +358,9 @@ def _histogram(ax, values, label, colour, log_scale):
             bins = np.geomspace(low, high, bins + 1)
         ax.hist(positive, bins=bins, color=colour, edgecolor='black', alpha=0.7)
         ax.set_xscale('log')
+        ax.xaxis.set_major_locator(LogLocator(subs=(1, 2, 5)))
+        ax.xaxis.set_major_formatter(_PLAIN)
+        ax.xaxis.set_minor_formatter(NullFormatter())
         logs = np.log(positive)
         stats = (f'Geometric mean: {np.exp(logs.mean()):.3g}\n'
                  f'GSD: {np.exp(logs.std()):.2f}\n'
@@ -361,53 +379,96 @@ def _histogram(ax, values, label, colour, log_scale):
             fontsize=10)
 
 
+# Length over width at which a particle counts as a fibre in occupational fibre
+# counting (NIOSH 7400, WHO), marked on the aspect-ratio plot.
+FIBRE_ASPECT_RATIO = 3.0
+
+
+def _aspect_histogram(ax, ratios, log_scale):
+    """
+    Particle shape: how elongated each one is, with the fibre ratio marked.
+
+    Size alone cannot tell a fibre from a compact particle of the same area;
+    this is the plot that can.
+    """
+    ratios = np.asarray(ratios, dtype=float)
+    ratios = ratios[np.isfinite(ratios) & (ratios >= 1)]
+    high = max(float(ratios.max()), FIBRE_ASPECT_RATIO * 1.5)
+    count = min(30, max(len(ratios), 1))
+    if log_scale:
+        bins = np.geomspace(1, high, count + 1)
+        ax.set_xscale('log')
+        ticks = [t for t in (1, 1.5, 2, 3, 5, 10, 20, 50, 100, 200, 500) if t <= high]
+        ax.xaxis.set_major_locator(FixedLocator(ticks))
+        ax.xaxis.set_major_formatter(_PLAIN)
+        ax.xaxis.set_minor_formatter(NullFormatter())
+    else:
+        bins = np.linspace(1, high, count + 1)
+    ax.hist(ratios, bins=bins, color='mediumseagreen', edgecolor='black', alpha=0.7)
+    ax.axvline(FIBRE_ASPECT_RATIO, color='black', linestyle='--', linewidth=1.2)
+    ax.text(FIBRE_ASPECT_RATIO, 0.97, ' 3:1', transform=ax.get_xaxis_transform(),
+            va='top', ha='left', fontsize=10)
+    fibres = float((ratios >= FIBRE_ASPECT_RATIO).mean())
+    stats = (f'Median: {np.median(ratios):.2f}\n'
+             f'At or above 3:1: {100 * fibres:.0f}%')
+    ax.set_xlabel('Aspect ratio, length / width' + (' (log scale)' if log_scale else ''),
+                  fontsize=12, fontweight='bold')
+    ax.set_ylabel('Frequency', fontsize=12, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+    ax.text(0.98, 0.98, stats, transform=ax.transAxes,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+            fontsize=10)
+
+
+def _nothing_to_plot(ax, text):
+    ax.text(0.5, 0.5, text, ha='center', va='center', fontsize=12,
+            transform=ax.transAxes)
+    ax.axis('off')
+
+
 def create_histogram_plots(measurements, log_scale=False):
     """
-    Create histograms for particle size distribution.
+    The size and shape distributions of a set of particles, side by side.
+
+    Size is the equivalent diameter; area would only repeat it on another
+    scale. Shape is the aspect ratio, which says what size cannot: how many of
+    the particles are fibres.
 
     Args:
-        measurements (dict): Measurements from ParticleAnalyzer
-        log_scale (bool): Log size axis. Particle sizes usually span orders of
+        measurements (dict): 'diameters', 'aspect_ratios' and 'unit'. Either
+            list may be empty.
+        log_scale (bool): Log axes. Particle sizes usually span orders of
             magnitude, and on a linear axis one large particle crowds every
             other into the first bar.
 
     Returns:
-        np.ndarray: Combined histogram image
+        np.ndarray: The figure, as an RGB image.
     """
-    if measurements['num_particles'] == 0:
-        # Return empty plot
-        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
-        ax.text(0.5, 0.5, 'No particles to plot', ha='center', va='center', fontsize=14)
-        ax.axis('off')
-        fig.canvas.draw()
-        buf = fig.canvas.buffer_rgba()
-        img_array = np.asarray(buf)[:, :, :3]
-        plt.close(fig)
-        return img_array
+    diameters = np.asarray(measurements.get('diameters') or [], dtype=float)
+    ratios = measurements.get('aspect_ratios') or []
+    unit = measurements.get('unit', 'nm')
 
-    areas = np.array(measurements['areas'])
-    diameters = np.array(measurements['diameters'])
-    unit = measurements['unit']
+    fig = Figure(figsize=(14, 5))
+    FigureCanvasAgg(fig)
+    size_ax, shape_ax = fig.subplots(1, 2)
 
-    # Create figure with 2 subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    if len(diameters):
+        _histogram(size_ax, diameters, f'Equivalent diameter ({unit})', 'coral',
+                   log_scale)
+        size_ax.set_title(f'Size (n={len(diameters)})', fontsize=14, fontweight='bold')
+    else:
+        _nothing_to_plot(size_ax, 'No sizes to plot')
 
-    _histogram(ax1, areas, f'Particle Area ({unit}²)', 'steelblue', log_scale)
-    ax1.set_title(f'Particle Area Distribution\n(n={len(areas)})', fontsize=14, fontweight='bold')
+    if len(ratios):
+        _aspect_histogram(shape_ax, ratios, log_scale)
+        shape_ax.set_title(f'Shape (n={len(ratios)})', fontsize=14, fontweight='bold')
+    else:
+        _nothing_to_plot(shape_ax, 'No aspect ratios recorded')
 
-    _histogram(ax2, diameters, f'Equivalent Diameter ({unit})', 'coral', log_scale)
-    ax2.set_title(f'Particle Diameter Distribution\n(n={len(diameters)})', fontsize=14,
-                  fontweight='bold')
-
-    plt.tight_layout()
-
-    # Convert to image
+    fig.tight_layout()
     fig.canvas.draw()
-    buf = fig.canvas.buffer_rgba()
-    img_array = np.asarray(buf)[:, :, :3]
-    plt.close(fig)
-
-    return img_array
+    return np.asarray(fig.canvas.buffer_rgba())[:, :, :3].copy()
 
 
 # The scale check is drawn at a fixed width so a bar that is 80px in a 2048px

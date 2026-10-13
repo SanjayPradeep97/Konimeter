@@ -85,9 +85,9 @@ The first time a scale bar is read, EasyOCR downloads its text models (about
 | Any platform | `konimeter`, in the activated environment |
 
 Then open http://127.0.0.1:7860. `--port` and `--host` change where it listens.
-`--share` also serves the app through a public Gradio link; since the app opens
-folders by path, anyone with that link can open folders on your computer, so
-share it only with people you trust.
+`--share` also serves the app through a public Gradio link, for looking at it
+from another device. The image folder is always chosen on the computer running
+Konimeter, in its own folder window, so choose it there.
 
 `run_app.bat` finds conda in the usual Anaconda, Miniconda and Miniforge install
 folders, or the one an Anaconda Prompt was started from, and activates
@@ -100,12 +100,12 @@ OpenMP runtime and otherwise refuse to share a process.
 
 | Tab | What happens there |
 | --- | --- |
-| ⚙️ Setup | Load the SAM model (the first time, download it with the button there), say whether the images are from an SEM or a TEM, then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it |
+| ⚙️ Setup | Load the SAM model (the first time, download it with the button there), say whether the images are from an SEM or a TEM, then press **Choose folder…** and pick the folder of images. Results go to `analysis_results.csv` in that folder, and choosing the folder again carries on with it |
 | 🖼️ Gallery | Pick an image. Ticked images already have saved results |
-| 📏 Scale & Frame | Establish the scale, and check what the app decided about the image (see below) |
+| 📏 Scale & Frame | The image beside three panels: **Scale** (the value, where it came from, and whether it needs a look), **Measure the scale bar** (by a box or by its two ends) and **Frame** (microscope, particles brighter or darker, databar, area left out). See below |
 | 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include/exclude clicks. Every click and every applied change can be undone. *Particles are* (darker / brighter than the background) sets which candidates come first |
 | 💾 Results | The measurements per image, and the whole folder's results: delete rows, remove duplicates, export |
-| 📊 Plots | Size distributions across everything saved, on a log or linear size axis. On log, with the geometric mean and geometric standard deviation |
+| 📊 Plots | Size and shape of every particle saved in the folder: equivalent diameter (with the geometric mean and geometric standard deviation on a log axis) and aspect ratio, with the 3:1 ratio that defines a fibre marked |
 
 The app keeps one process-wide session, so it is built for one analyst at a time;
 two browser tabs pointed at the same server share it.
@@ -118,19 +118,19 @@ tab. Three methods, tried in order of trustworthiness:
 | | Method | When |
 | --- | --- | --- |
 | 1 | Pixel size read from the file's own metadata | Automatic on load. Exact — nothing to check. Read from FEI/Thermo, Zeiss, Hitachi and TESCAN TIFFs, AMT TEM cameras, and the `.txt` a JEOL SEM saves beside each image. A TIFF's resolution tag is ignored: programs fill it with a print setting |
-| 2 | Read the printed scale bar inside a box | Runs automatically when there is no metadata. Drag to draw the box, a corner to resize it, the middle to move it |
-| 3 | Click each end of the bar and type its length: the outer edge of a solid bar, the middle of each end tick of a \|—\| bar | When the bar cannot be read. A 7x magnifier follows the cursor so you land exactly |
+| 2 | Read the printed scale bar | Runs automatically when there is no metadata. To read it yourself, choose **Draw a box**, drag a box around the bar and its label, and press **Read scale bar** |
+| 3 | **Click both ends** of the bar and type its length: the outer edge of a solid bar, the middle of each end tick of a \|—\| bar | When the bar cannot be read. A 7x magnifier follows the cursor so you land exactly |
 
-A reading from the printed bar is marked unconfirmed until you press **Confirm
-scale**, and the measured span is drawn on the bar so you can see what was read.
-The value read off the label is shown beside the button: if OCR misread it, type
-the right one before confirming, and the measured bar is kept. The same misreading
-of a bar the same length is corrected the same way from then on, and every scale
-you confirm lets later images at that magnification through without asking.
-Metadata and hand measurement are trusted outright, since neither involves a
-machine reading a glyph. The result is shown as "X nm/px · how it was obtained",
-and is what segmentation and the results file use; how the scale was obtained is
-recorded beside every row in the `scale_method` column.
+A reading from the printed bar is marked **Unconfirmed** until you press
+**Confirm**, and the measured span is drawn on the bar so you can see what was
+read. The value read off the label is shown beside the button: if OCR misread it,
+type the right one before confirming, and the measured bar is kept. The same
+misreading of a bar the same length is corrected the same way from then on, and
+every scale you confirm lets later images at that magnification through without
+asking. Metadata and hand measurement are trusted outright, since neither
+involves a machine reading a glyph. **Detect again** throws away a scale set by
+hand and goes back to what the file says. How each scale was obtained is recorded
+beside every row in the `scale_method` column.
 
 ### SEM or TEM
 
@@ -175,6 +175,7 @@ gone and scale has to come from the printed bar or from a hand measurement.
 | `scale_method` | how that scale was obtained: `metadata`, `box_ocr`, `two_points` or `none`; `+unconfirmed` if nobody confirmed it |
 | `particle_areas_px`, `particle_areas_nm2` | each particle's area |
 | `equiv_diameters_px`, `equiv_diameters_nm` | each particle's equivalent circular diameter |
+| `aspect_ratios` | each particle's length over width (the axes of its fitted ellipse, as ImageJ's AR); 1 for a disc |
 
 Supported images: `.tif`, `.tiff`, `.png`, `.jpg`, `.jpeg`, in any letter case,
 directly inside the folder (subfolders are not searched).
@@ -211,7 +212,7 @@ the Setup tab.
 | `OMP: Error #15 ... already initialized` on Windows | Start the app with `run_app.bat`, or `set KMP_DUPLICATE_LIB_OK=TRUE` first |
 | The app will not start because the port is in use | Another copy is running; close it, or start with `--port 7861` |
 | "No images in …" | The images must be directly inside the folder, with one of the extensions above |
-| "Results cannot be saved in …" | The folder is read-only (a network share, say). Copy the images to a folder you can write to, and open that one |
+| "Results cannot be saved in …" | The folder is read-only (a network share, say). Copy the images to a folder you can write to, and choose that one |
 | `konimeter: command not found`, or `ModuleNotFoundError` for `sem_particle_analysis` or `sem_analysis_app` | The environment is not active, or `pip install -e .` was not run in it |
 
 Anything else: please [open an issue](https://github.com/SanjayPradeep97/Konimeter/issues)

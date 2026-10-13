@@ -330,3 +330,24 @@ class TestOlderResultsFilesAreWidened:
 
         ResultsManager(csv_file=str(path))
         assert os.stat(path).st_mtime_ns == stamp
+
+
+class TestAspectRatios:
+    def test_each_particles_ratio_is_saved(self, manager):
+        manager.add_result("a.tif", dict(measurements(2), aspect_ratios=[1.25, 4.0]))
+        row = pd.read_csv(manager.csv_file).iloc[0]
+        assert dm.parse_measurement_list(row["aspect_ratios"]) == [1.25, 4.0]
+
+    def test_an_older_results_file_gains_the_column(self, tmp_path):
+        path = tmp_path / "results.csv"
+        older = ["file_name", "num_particles", "nm_per_px", "scale_method",
+                 "particle_areas_px", "equiv_diameters_px", "particle_areas_nm2",
+                 "equiv_diameters_nm"]
+        pd.DataFrame([["old.tif", 0, 2.5, "metadata", "[]", "[]", "[]", "[]"]],
+                     columns=older).to_csv(path, index=False)
+        manager = ResultsManager(csv_file=str(path))
+        manager.add_result("new.tif", dict(measurements(1), aspect_ratios=[2.0]))
+        frame = pd.read_csv(path)
+        assert "aspect_ratios" in frame.columns
+        assert dm.parse_measurement_list(frame["aspect_ratios"].iloc[0]) == []
+        assert dm.parse_measurement_list(frame["aspect_ratios"].iloc[1]) == [2.0]

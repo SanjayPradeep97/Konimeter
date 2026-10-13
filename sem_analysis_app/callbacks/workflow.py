@@ -84,11 +84,11 @@ def open_current_image(progress=gr.Progress()):
     Next button and a session restore all take exactly the same path.
 
     Returns:
-        tuple: (canvas_payload, tier1_status, scale_summary, point_readout,
+        tuple: (canvas_payload, scale_message, scale_card, point_readout,
                 frame_status, header, mask_viz, segment_status, mask_choice,
                 tool, point_type, working view)
     """
-    payload, tier1, summary, hint, frame = prepare_scale_tab()
+    payload, message, card, hint, frame = prepare_scale_tab()
     mask_viz, segment_status, choice = auto_process_current_image(progress)
     # The header is built last, so it can report the particle count. The two
     # tool controls are set to what reset_image_state left in state, so the
@@ -96,7 +96,7 @@ def open_current_image(progress=gr.Progress()):
     # shows the new frame plain: left alone, it kept the previous image's
     # outlines under the new image's candidates until one was chosen.
     frame_view = state.cropped_image if state.cropped_image is not None else state.current_image
-    return (payload, tier1, summary, hint, frame, frame_header(),
+    return (payload, message, card, hint, frame, frame_header(),
             mask_viz, segment_status, choice, state.click_mode, state.point_type,
             for_display(frame_view))
 
@@ -152,8 +152,8 @@ def save_and_next(progress=gr.Progress()):
     and otherwise offers it for a glance without moving.
 
     Returns:
-        tuple: (save_status, gallery, image_info, canvas_payload, tier1_status,
-                scale_summary, point_readout, frame_status, header, mask_viz,
+        tuple: (save_status, gallery, image_info, canvas_payload, scale_message,
+                scale_card, point_readout, frame_status, header, mask_viz,
                 segment_status, mask_choice)
     """
     save_status, gallery_data = save_current_results()
@@ -175,7 +175,7 @@ def skip_to_next(progress=gr.Progress()):
     Advance without saving, for images that aren't worth measuring.
 
     Returns:
-        tuple: (image_info, canvas_payload, tier1_status, scale_summary,
+        tuple: (image_info, canvas_payload, scale_message, scale_card,
                 point_readout, frame_status, header, mask_viz, segment_status,
                 mask_choice)
     """

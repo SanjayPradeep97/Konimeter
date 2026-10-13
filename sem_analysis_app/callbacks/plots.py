@@ -29,38 +29,36 @@ def update_histogram_plots(axis="Log"):
 
         # Only frames saved with a scale have sizes in nm. Those saved without
         # one are in pixels and cannot share an axis with them, so they are left
-        # out, and the status says how many.
-        all_areas, all_diameters = [], []
+        # out, and the status says how many. Aspect ratio needs no scale, so it
+        # is plotted for every frame that recorded it.
+        diameters, ratios = [], []
         for _, row in results_df.iterrows():
-            all_areas.extend(parse_measurement_list(row['particle_areas_nm2']))
-            all_diameters.extend(parse_measurement_list(row['equiv_diameters_nm']))
+            diameters.extend(parse_measurement_list(row['equiv_diameters_nm']))
+            ratios.extend(parse_measurement_list(row.get('aspect_ratios')))
         total = int(results_df['num_particles'].sum())
 
-        if not all_areas:
+        if not diameters and not ratios:
             return None, ("❌ No frame has been saved with a scale yet, so there "
                           "are no sizes in nm to plot.")
-
-        combined_measurements = {
-            'num_particles': len(all_areas),
-            'areas': all_areas,
-            'diameters': all_diameters,
-            'unit': 'nm'
-        }
 
         # Relative, like every other import in this package. As an absolute
         # import this resolved only if the working directory happened to be
         # sem_analysis_app, so the Plots tab reported "No module named
         # 'visualization'" wherever the app is actually launched from.
         from ..visualization import create_histogram_plots
-        histogram_img = create_histogram_plots(combined_measurements,
-                                               log_scale=AXIS_CHOICES.get(axis, True))
+        histogram_img = create_histogram_plots(
+            {'diameters': diameters, 'aspect_ratios': ratios, 'unit': 'nm'},
+            log_scale=AXIS_CHOICES.get(axis, True))
 
         images = len(results_df)
-        status = (f"✅ {len(all_areas)} particle{'' if len(all_areas) == 1 else 's'} "
-                  f"from {images} image{'' if images == 1 else 's'}")
-        if len(all_areas) < total:
-            status += (f". {total - len(all_areas)} more are in frames saved without "
-                       "a scale, measured in pixels, and are not plotted.")
+        status = (f"✅ {total} particle{'' if total == 1 else 's'} "
+                  f"from {images} image{'' if images == 1 else 's'}.")
+        if len(diameters) < total:
+            status += (f" {total - len(diameters)} were measured without a scale "
+                       "and are left out of the size plot.")
+        if len(ratios) < total:
+            status += (f" {total - len(ratios)} were saved before aspect ratio was "
+                       "recorded; save those images again to include them.")
         return histogram_img, status
 
     except Exception as e:

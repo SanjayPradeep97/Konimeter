@@ -13,6 +13,7 @@ from sem_particle_analysis import (SAMModel, ScaleDetector, ParticleSegmenter,
 from sem_particle_analysis import weights
 from sem_particle_analysis.model import weights_dir
 from sem_particle_analysis.utils import find_images_in_folder
+from .. import folder_dialog
 from ..state import state
 from .gallery import create_image_gallery
 
@@ -20,8 +21,7 @@ RESULTS_FILENAME = "analysis_results.csv"
 
 # What the checkpoint list says, depending on whether it found any.
 CHECKPOINTS_FOUND = "Found in sam_weights/. Paste a path to use one from elsewhere."
-CHECKPOINTS_MISSING = ("None yet: download the model with the button below, or paste "
-                       "the path of a checkpoint you already have.")
+CHECKPOINTS_MISSING = "None yet: download the model below, or paste a checkpoint's path."
 
 
 def clean_path(text):
@@ -152,7 +152,7 @@ def restore_setup():
 
     Returns:
         tuple: (checkpoint list, download button, Load model button, model status,
-        Load images button, microscope)
+        Choose folder button, microscope, folder shown)
     """
     found = [str(p) for p in discover_checkpoints()]
     loaded = state.sam_model is not None
@@ -169,7 +169,17 @@ def restore_setup():
             gr.update(variant="primary" if found else "secondary"),
             status,
             gr.update(interactive=loaded),
-            gr.update(value=state.microscope))
+            gr.update(value=state.microscope),
+            current_folder() or "")
+
+
+def current_folder():
+    """The folder open now, or None."""
+    if state.results_manager is not None and state.results_manager.csv_file:
+        return os.path.dirname(os.path.abspath(state.results_manager.csv_file))
+    if state.image_paths:
+        return os.path.dirname(os.path.abspath(str(state.image_paths[0])))
+    return None
 
 
 def set_microscope(choice):
@@ -227,15 +237,15 @@ def load_images_from_folder(folder, microscope=None, progress=gr.Progress()):
     try:
         folder = clean_path(folder)
         if not folder:
-            return ("❌ Paste the path of a folder of images.",) + unchanged
+            return ("❌ Choose a folder of images.",) + unchanged
         if not os.path.isdir(folder):
             return (f"❌ No folder at {folder}",) + unchanged
 
         progress(0.3, desc="Finding images...")
         image_paths = find_images_in_folder(folder)
         if not image_paths:
-            return ((f"❌ No images in {folder}. Looking for .tif, .tiff, .png, "
-                     ".jpg and .jpeg files directly inside it."),) + unchanged
+            return ((f"❌ No images in {folder}. Konimeter opens the .tif, .png "
+                     "and .jpg files directly inside the folder."),) + unchanged
 
         # Checked before anything changes: a folder that cannot be written to
         # would otherwise fail on the first save, after the analyst's work.
@@ -249,8 +259,8 @@ def load_images_from_folder(folder, microscope=None, progress=gr.Progress()):
             results_manager = ResultsManager(csv_file=csv_path)
         except OSError as e:
             return ((f"❌ Results cannot be saved in {folder} ({e.strerror or e}). "
-                     "Copy the images to a folder you can write to, and open that "
-                     "one."),) + unchanged
+                     "Copy the images to a folder you can write to, and choose "
+                     "that one."),) + unchanged
 
         state.image_paths = image_paths
         state.current_index = 0
@@ -275,28 +285,53 @@ def load_images_from_folder(folder, microscope=None, progress=gr.Progress()):
         state.microscope = chosen or in_files
 
         count = len(image_paths)
-        status_parts = [f"✅ {count} image{'' if count == 1 else 's'} in {folder}. "
-                        f"Results are saved to {RESULTS_FILENAME} there."]
+        status_parts = [f"✅ {count} image{'' if count == 1 else 's'}. Results are "
+                        f"saved to {RESULTS_FILENAME} in this folder."]
         if chosen and in_files and in_files != chosen:
-            status_parts.append(f"⚠️ Set to {chosen}, but the files say {in_files}: "
-                                "check the Microscope choice above.")
-        elif chosen:
-            status_parts.append(f"Microscope: {chosen}.")
-        elif in_files:
-            status_parts.append(f"Microscope: {in_files}, read from the files.")
-        else:
-            status_parts.append("⚠️ The files do not say which microscope made them: "
-                                "choose SEM or TEM above.")
+            status_parts.append(f"⚠️ Microscope is set to {chosen}, but the files "
+                                f"say {in_files}.")
+        elif in_files and not chosen:
+            status_parts.append(f"Microscope set to {in_files} from the files.")
+        elif not state.microscope:
+            status_parts.append("⚠️ The files do not say which microscope made "
+                                "them: choose SEM or TEM.")
         if matched > 0:
             status_parts.append(f"{matched} already analysed.")
         if unmatched > 0:
             status_parts.append(f"⚠️ {unmatched} row{'' if unmatched == 1 else 's'} in "
-                                "the results file match no image in this folder.")
+                                "the results file match no image here.")
 
-        return (" ".join(status_parts), gallery_data, gr.Tabs(selected=1),
+        # Straight to the images, unless the microscope still has to be chosen:
+        # that is asked for here, and would go unseen from the Gallery.
+        tabs = gr.Tabs(selected=1) if state.microscope else gr.update()
+        return (" ".join(status_parts), gallery_data, tabs,
                 gr.update(value=state.microscope))
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return (f"❌ Error: {str(e)}",) + unchanged
+
+
+def browse_for_folder(microscope=None, progress=gr.Progress()):
+    """
+    Choose a folder with the system's own dialog, and open it.
+
+    The only way a folder is chosen: a typed path was one more thing to get
+    wrong, and the analyst should not need to know how to copy one.
+
+    Returns:
+        tuple: (folder shown, status, gallery update, tabs update, microscope update)
+    """
+    try:
+        folder = folder_dialog.choose_folder(start=current_folder())
+    except folder_dialog.FolderDialogError as problem:
+        return (gr.update(), f"❌ The folder dialog could not be opened ({problem}).",
+                gr.update(), gr.update(), gr.update())
+    if folder is None:      # cancelled: leave everything as it was
+        return (gr.update(),) * 5
+    status, gallery, tabs, chosen = load_images_from_folder(folder, microscope,
+                                                            progress=progress)
+    # A folder that could not be opened leaves the one before it open.
+    shown = gr.update() if status.startswith("❌") else folder
+    return shown, status, gallery, tabs, chosen

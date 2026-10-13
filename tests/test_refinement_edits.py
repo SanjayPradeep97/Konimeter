@@ -383,9 +383,9 @@ class TestTablesSayTheirUnit:
         measurements = analyzer.get_measurements(in_nm=True)
 
         assert list(create_results_dataframe(measurements).columns) == [
-            "Particle ID", "Area (px²)", "Diameter (px)"]
+            "Particle ID", "Area (px²)", "Diameter (px)", "Aspect ratio"]
         assert list(create_summary_statistics_table(measurements).columns) == [
-            "Metric", "Area (px²)", "Diameter (px)"]
+            "Metric", "Area (px²)", "Diameter (px)", "Aspect ratio"]
 
     def test_nanometres_when_there_is_a_scale(self):
         from sem_analysis_app.visualization import create_results_dataframe

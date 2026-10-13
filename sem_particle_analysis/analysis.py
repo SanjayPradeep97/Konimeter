@@ -28,6 +28,21 @@ def equivalent_diameter(region):
         return region.equivalent_diameter
 
 
+def aspect_ratio(region):
+    """
+    Length over width of a particle: the axes of the ellipse with the same
+    second moments, as ImageJ reports "AR". 1 for a disc, large for a fibre.
+
+    A particle one pixel wide has a minor axis of zero, so both axes count as at
+    least a pixel; the ratio is then finite and still says "long and thin".
+    """
+    try:
+        major, minor = region.axis_major_length, region.axis_minor_length
+    except AttributeError:  # scikit-image < 0.19
+        major, minor = region.major_axis_length, region.minor_axis_length
+    return max(major, 1.0) / max(minor, 1.0)
+
+
 class ParticleAnalyzer:
     """
     Analyzes segmented particles and computes measurements.
@@ -238,6 +253,7 @@ class ParticleAnalyzer:
                 - 'num_particles': Number of particles
                 - 'areas': List of particle areas
                 - 'diameters': List of equivalent diameters
+                - 'aspect_ratios': Length over width of each, unitless
                 - 'centroids': List of (x, y) centroid coordinates
                 - 'bboxes': List of bounding boxes (min_row, min_col, max_row, max_col)
                 - 'unit': Measurement unit ('nm' or 'pixels')
@@ -247,6 +263,7 @@ class ParticleAnalyzer:
                 'num_particles': 0,
                 'areas': [],
                 'diameters': [],
+                'aspect_ratios': [],
                 'centroids': [],
                 'bboxes': [],
                 'unit': 'nm' if in_nm and self.conversion else 'pixels',
@@ -275,6 +292,7 @@ class ParticleAnalyzer:
             'num_particles': len(self.regions),
             'areas': areas,
             'diameters': diameters,
+            'aspect_ratios': [aspect_ratio(r) for r in self.regions],
             'centroids': centroids,
             'bboxes': bboxes,
             'unit': unit,

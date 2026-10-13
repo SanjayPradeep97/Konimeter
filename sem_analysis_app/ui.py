@@ -12,12 +12,12 @@ places to set it would mean two answers.
 import gradio as gr
 
 from sem_particle_analysis import discover_checkpoints
-from .callbacks.scale_tab import UNITS
+from .callbacks.scale_tab import POINTS_HINT, UNITS
 
 from .callbacks import (
     # setup + gallery
+    browse_for_folder,
     initialize_sam,
-    load_images_from_folder,
     restore_session,
     restore_scale_tab,
     restore_setup,
@@ -34,8 +34,8 @@ from .callbacks import (
     apply_two_points,
     check_outputs,
     clear_crop_override,
-    clear_scale,
     confirm_scale,
+    detect_scale_again,
     frame_header,
     frame_summary,
     live_point_readout,
@@ -117,6 +117,86 @@ APP_CSS = """
 /* Numbers read better tabular. */
 .gr-dataframe table {font-variant-numeric: tabular-nums; font-size: 13px;}
 
+/* The app's name, on one line, so the work gets the height. */
+.app-header {display: flex; align-items: baseline; gap: 12px; padding: 2px 2px 0;}
+.app-name {font-size: 22px; font-weight: 700; letter-spacing: -0.01em;}
+.app-tagline {font-size: 14px; color: var(--body-text-color-subdued);}
+
+/* A field and its button on one line, the field without a label box. */
+.folder-row, .inline-row {align-items: center;}
+.folder-row button, .inline-row button {white-space: nowrap;}
+
+/* A label beside a field rather than above it. */
+.field-caption {font-size: 13px; color: var(--body-text-color-subdued); white-space: nowrap;}
+
+/* Short guidance under a control. */
+.hint, .hint p {font-size: 13px; color: var(--body-text-color-subdued); margin: 0;}
+
+/* ---- Scale & Frame ------------------------------------------------------ */
+/* The three panels beside the image: tighter than Gradio's default spacing,
+   so all three fit beside the image without scrolling. */
+.inspector {gap: 10px !important;}
+.inspector > .column {gap: 8px !important;}
+.panel-head {align-items: center;}
+.panel-head button {flex-grow: 0 !important;}
+.panel-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--body-text-color-subdued);
+}
+.scale-stage {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 420px;
+    background: #0d0d0d;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.scale-stage canvas {display: block; max-width: 100%;}
+.scale-head {display: flex; align-items: center; justify-content: space-between; gap: 8px;}
+.scale-value {font-size: 26px; font-weight: 600; line-height: 1.2;
+              font-variant-numeric: tabular-nums;}
+.scale-unit {font-size: 15px; font-weight: 500; color: var(--body-text-color-subdued);}
+.scale-source {font-size: 13px; color: var(--body-text-color-subdued); margin-top: 2px;}
+.scale-warning {
+    font-size: 13px;
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba(217, 119, 6, .10);
+    color: #92400e;
+}
+.scale-message p {font-size: 13px; margin: 0;}
+.badge {font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+        white-space: nowrap;}
+.badge-ok {background: rgba(22, 163, 74, .12); color: #15803d;}
+.badge-warn {background: rgba(217, 119, 6, .14); color: #b45309;}
+.badge-bad {background: rgba(220, 38, 38, .12); color: #b91c1c;}
+.dark .badge-ok {color: #4ade80;}
+.dark .badge-warn, .dark .kv-warn {color: #fbbf24;}
+.dark .badge-bad {color: #f87171;}
+.dark .scale-warning {color: #fcd34d;}
+
+/* A list of name / value pairs. Gradio styles tables in an HTML block as a
+   grid, so its borders and padding are overridden here. */
+.kv {width: 100%; margin: 0 !important; border-collapse: collapse; font-size: 14px;}
+.kv, .kv tbody, .kv tr, .kv th, .kv td {border: none !important;
+                                        background: transparent !important;}
+.kv th, .kv td {padding: 5px 0 !important; text-align: left; vertical-align: top;}
+.kv th {
+    width: 34%;
+    padding-right: 8px !important;
+    font-weight: 500 !important;
+    color: var(--body-text-color-subdued) !important;
+}
+.kv tr + tr th, .kv tr + tr td {border-top: 1px solid var(--border-color-primary) !important;}
+.kv-note {margin-left: 4px; font-size: 12px; color: var(--body-text-color-subdued);}
+.kv-warn {margin-top: 2px; font-size: 12px; color: #b45309;}
+.kv-empty {font-size: 13px; color: var(--body-text-color-subdued);}
+
 /* A step heading inside a rail. */
 .step-title {
     font-weight: 600;
@@ -141,12 +221,9 @@ def create_interface():
     # they are made (checked hourly), and any left over when the app next starts.
     with gr.Blocks(title="Konimeter", delete_cache=(3600, 3600)) as app:
 
-        gr.Markdown("# 🔬 Konimeter · particle analysis for SEM & TEM")
-        gr.Markdown(
-            "Size and count particles in electron micrographs. Scale, instrument "
-            "and analysable area are worked out per image; you judge the mask and "
-            "correct it."
-        )
+        gr.HTML('<div class="app-header"><span class="app-name">Konimeter</span>'
+                '<span class="app-tagline">Particle analysis for SEM and TEM '
+                'micrographs</span></div>', padding=False)
 
         with gr.Tabs() as tabs:
 
@@ -189,40 +266,35 @@ def create_interface():
 
                     with gr.Column():
                         gr.Markdown("### 2 · Images", elem_classes=["step-title"])
-                        gr.Markdown(
-                            "Paste the path of **one sample folder**. Every image "
-                            "in it is opened, and results are saved to "
-                            "`analysis_results.csv` in that folder. Open the "
-                            "folder again later to carry on where you left off."
-                        )
-                        # A path rather than an upload: an uploaded file reaches
-                        # the app as a copy in Gradio's temporary cache, so the
-                        # results would have been saved there too.
-                        folder_input = gr.Textbox(
-                            label="Image folder",
-                            max_lines=1,
-                            placeholder=r"C:\Data\Sample A   or   /Users/me/Data/Sample A",
-                            info="To copy a folder's path: in File Explorer, "
-                                 "Shift + right-click it → Copy as path; in "
-                                 "Finder, select it and press ⌥⌘C.",
-                        )
                         microscope_choice = gr.Radio(
                             choices=["SEM", "TEM"], value=None, label="Microscope",
-                            info="SEM: particles usually brighter than the "
-                                 "background. TEM: darker. Filled in from the "
-                                 "files when they say.",
+                            info="Particles are expected brighter than the "
+                                 "background in SEM, darker in TEM. Filled in "
+                                 "from the files when they say.",
                         )
-                        load_btn = gr.Button("📁 Load images", variant="primary",
-                                             size="lg", interactive=False)
-                        load_status = gr.Textbox(label="Status", interactive=False)
+                        # Chosen with the system's own folder dialog, never typed:
+                        # the images are read where they are, and the results
+                        # saved beside them, which an upload into the browser
+                        # cannot do.
+                        with gr.Row(equal_height=True, elem_classes=["folder-row"]):
+                            folder_shown = gr.Textbox(
+                                show_label=False, container=False, interactive=False,
+                                max_lines=1, placeholder="No folder chosen", scale=4)
+                            browse_btn = gr.Button("Choose folder…", variant="primary",
+                                                   scale=0, min_width=160,
+                                                   interactive=False)
+                        gr.Markdown(
+                            "Results are saved in the folder as "
+                            "`analysis_results.csv`. Choose the same folder again "
+                            "to carry on where you left off.",
+                            elem_classes=["hint"])
+                        load_status = gr.Textbox(label="Status", interactive=False,
+                                                 lines=2)
                         save_dataset_box = gr.Checkbox(
                             value=True,
                             label="Also keep each saved image and its mask as training data",
-                            info="Written to konimeter_dataset/ beside the results "
-                                 "file: the frame, its corrected mask and a record "
-                                 "of how it was made, ready for training a "
-                                 "classifier or fine-tuning segmentation. Nothing "
-                                 "leaves this computer.",
+                            info="Saved to konimeter_dataset/ in the image folder. "
+                                 "Nothing leaves this computer.",
                         )
 
             # ============================================================
@@ -245,71 +317,9 @@ def create_interface():
             # TAB 2: Scale & Frame
             # ============================================================
             with gr.Tab("📏 Scale & Frame", id=2):
-                gr.Markdown(
-                    "Every measurement is a pixel count times the scale, so this "
-                    "is the one place it is set. Tier 1 runs by itself; fall "
-                    "through to 2 or 3 only when it fails."
-                )
-
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        tier1_status = gr.Textbox(
-                            label="Tier 1 — file metadata", interactive=False, lines=3
-                        )
-                    with gr.Column(scale=1):
-                        scale_summary = gr.Textbox(
-                            label="Scale in force", interactive=False, lines=3
-                        )
-                with gr.Row():
-                    # The value read off the bar, to correct before confirming:
-                    # OCR misreads the number far more often than it mismeasures
-                    # the bar.
-                    printed_value = gr.Number(label="Bar's printed value", visible=False,
-                                              scale=1, min_width=120)
-                    printed_unit = gr.Dropdown(choices=UNITS, label="Unit", visible=False,
-                                               scale=1, min_width=90)
-                    confirm_scale_btn = gr.Button("✔️ Confirm scale", variant="primary")
-                    clear_scale_btn = gr.Button("✖️ Clear", variant="secondary")
-
-                with gr.Accordion("🔬 Frame — instrument, databar, analysable area",
-                                  open=True):
-                    gr.Markdown(
-                        "The instrument is read from the file where it says so. "
-                        "An information strip (databar) below the image is cut "
-                        "off. Beam-blocked area — an aperture vignette, a grid "
-                        "bar — and any burned-in scale bar are left out of "
-                        "measurement, because they out-contrast the particles "
-                        "and would be counted instead."
-                    )
-                    with gr.Row():
-                        with gr.Column(scale=1):
-                            # Off by default and hiding its input: an always-on
-                            # number field shows 0, and 0 means "keep the whole
-                            # frame" — one absent-minded Apply would leave an SEM
-                            # databar in shot to be measured as particles.
-                            crop_manual = gr.Checkbox(
-                                label="Override the databar trim", value=False,
-                                info="Off = measure it, which is exact whenever "
-                                     "the instrument recorded a scan height",
-                            )
-                            with gr.Row(visible=False) as crop_controls:
-                                crop_override = gr.Number(
-                                    label="Trim from bottom (%)", value=0,
-                                    minimum=0, maximum=40, scale=2,
-                                )
-                                crop_apply_btn = gr.Button("Apply", size="sm", scale=1)
-                    frame_status = gr.Markdown("Load an image to detect the instrument.")
-
-                gr.Markdown("---")
-
-                with gr.Row():
-                    with gr.Column(scale=3):
-                        canvas_mode = gr.Radio(
-                            choices=["Tier 2 — draw a box and read it",
-                                     "Tier 3 — click both ends of the bar"],
-                            value="Tier 2 — draw a box and read it",
-                            label="If tier 1 failed, pick a method",
-                        )
+                with gr.Row(equal_height=False):
+                    # ---- the image -------------------------------------------
+                    with gr.Column(scale=3, min_width=480):
                         # Channels the canvas JS reads from and writes into.
                         # Hidden with CSS rather than visible=False: Gradio 6
                         # omits invisible components from the DOM entirely, and
@@ -323,50 +333,94 @@ def create_interface():
                         # the scale is re-read, while the image stays the same.
                         scale_span_in = gr.Textbox(elem_id="scale_span_in", **_chan)
 
-                        gr.HTML(
-                            '<div style="width:100%">'
-                            '<canvas id="scale_canvas" '
-                            'style="max-width:100%;border-radius:8px;'
-                            'border:1px solid rgba(128,128,128,0.35)"></canvas>'
-                            '</div>'
-                        )
+                        gr.HTML('<div class="scale-stage">'
+                                '<canvas id="scale_canvas"></canvas></div>',
+                                padding=False)
 
-                    with gr.Column(scale=2):
-                        with gr.Group(visible=True) as tier2_controls:
-                            gr.Markdown(
-                                "**Tier 2.** Drag on the image to draw a box around "
-                                "the scale bar *and* its label. Drag a corner to "
-                                "resize, drag the middle to move."
+                    # ---- what was decided, and the means to change it ----------
+                    with gr.Column(scale=2, min_width=340, elem_classes=["inspector"]):
+                        with gr.Column(variant="panel"):
+                            with gr.Row(elem_classes=["panel-head"]):
+                                gr.HTML('<div class="panel-title">Scale</div>',
+                                        padding=False)
+                                detect_again_btn = gr.Button("Detect again", size="sm",
+                                                             scale=0, min_width=110)
+                            scale_card = gr.HTML(padding=False)
+                            # The number is only half the reading: the other half
+                            # is which pixels were counted, and that can only be
+                            # judged by looking. Ticks should sit on the ends of
+                            # the printed bar — not inside it, not past it.
+                            scale_preview = gr.Image(show_label=False, height=104,
+                                                     interactive=False, visible=False,
+                                                     container=False, buttons=[])
+                            # The value read off the bar, to correct before
+                            # confirming: OCR misreads the number far more often
+                            # than it mismeasures the bar.
+                            with gr.Row(equal_height=True, visible=False,
+                                        elem_classes=["inline-row"]) as confirm_row:
+                                gr.HTML('<div class="field-caption">Printed value</div>',
+                                        padding=False, scale=0, min_width=96)
+                                printed_value = gr.Number(label="Printed value",
+                                                          show_label=False, container=False,
+                                                          min_width=80)
+                                printed_unit = gr.Dropdown(choices=UNITS, label="Unit",
+                                                           show_label=False, container=False,
+                                                           min_width=76)
+                                confirm_scale_btn = gr.Button("Confirm", variant="primary",
+                                                              min_width=90)
+                            confirm_message = gr.Markdown("", elem_classes=["scale-message"])
+
+                        with gr.Column(variant="panel"):
+                            gr.HTML('<div class="panel-title">Measure the scale bar</div>',
+                                    padding=False)
+                            canvas_mode = gr.Radio(
+                                choices=[("Draw a box", "box"),
+                                         ("Click both ends", "points")],
+                                value="box", show_label=False, container=False,
                             )
-                            read_box_btn = gr.Button("🔍 Read scale in box",
-                                                     variant="primary")
+                            with gr.Column(visible=True) as box_controls:
+                                gr.Markdown("Drag a box around the scale bar and its "
+                                            "label on the image.", elem_classes=["hint"])
+                                with gr.Row():
+                                    read_box_btn = gr.Button("Read scale bar",
+                                                             variant="primary")
+                                    reset_box_btn = gr.Button("Reset box")
+                            with gr.Column(visible=False) as point_controls:
+                                point_readout = gr.Markdown(POINTS_HINT,
+                                                            elem_classes=["hint"])
+                                with gr.Row(equal_height=True, elem_classes=["inline-row"]):
+                                    # A text field: an empty number field shows 0,
+                                    # which reads as a value already entered.
+                                    bar_value = gr.Textbox(label="Length on the bar",
+                                                           show_label=False,
+                                                           container=False, max_lines=1,
+                                                           placeholder="Length on the bar",
+                                                           min_width=110)
+                                    bar_unit = gr.Dropdown(choices=UNITS, value="µm",
+                                                           label="Unit", show_label=False,
+                                                           container=False, min_width=80)
+                                with gr.Row():
+                                    apply_points_btn = gr.Button("Set scale",
+                                                                 variant="primary")
+                                    reset_points_canvas_btn = gr.Button("Clear points")
+                            scale_message = gr.Markdown("", elem_classes=["scale-message"])
 
-                        with gr.Group(visible=False) as tier3_controls:
-                            gr.Markdown(
-                                "**Tier 3.** Click each end of the bar: the outer edge "
-                                "of a solid bar, or the middle of each end tick of a "
-                                "|—| bar. A magnifier follows the cursor so you can land "
-                                "exactly, then type the printed length."
-                            )
-                            point_readout = gr.Textbox(label="Points", interactive=False)
-                            with gr.Row():
-                                bar_value = gr.Number(label="Printed length", value=None)
-                                bar_unit = gr.Dropdown(choices=UNITS, value="µm",
-                                                       label="Unit")
-                            apply_points_btn = gr.Button("📏 Apply two-point scale",
-                                                         variant="primary")
-
-                        reset_canvas_btn = gr.Button("↺ Reset box / points", size="sm")
-                        tier_status = gr.Textbox(label="Result", interactive=False,
-                                                 lines=3)
-                        # The number is only half the reading: the other half is
-                        # which pixels were counted, and that can only be judged
-                        # by looking. Ticks should sit on the ends of the printed
-                        # bar — not inside it, not past it.
-                        scale_preview = gr.Image(
-                            label="What was measured", height=190,
-                            interactive=False,
-                        )
+                        with gr.Column(variant="panel"):
+                            gr.HTML('<div class="panel-title">Frame</div>', padding=False)
+                            frame_status = gr.HTML('<div class="kv-empty">No image open.</div>',
+                                                   padding=False)
+                            # Off by default and hiding its input: an always-on
+                            # number field shows 0, and 0 means "keep the whole
+                            # frame" — one absent-minded Apply would leave an SEM
+                            # databar in shot to be measured as particles.
+                            crop_manual = gr.Checkbox(label="Set the databar crop by hand",
+                                                      value=False)
+                            with gr.Row(visible=False, equal_height=True) as crop_controls:
+                                crop_override = gr.Number(
+                                    label="Crop from bottom (%)", value=0,
+                                    minimum=0, maximum=40, scale=2,
+                                )
+                                crop_apply_btn = gr.Button("Apply", scale=1)
 
             # ============================================================
             # TAB 3: Segment & Refine
@@ -539,12 +593,10 @@ def create_interface():
             # TAB 5: Plots
             # ============================================================
             with gr.Tab("📊 Plots", id=5):
-                gr.Markdown("Size distribution across everything saved this session.")
+                gr.Markdown("Size and shape of every particle saved in this folder.")
                 with gr.Row():
                     update_plots_btn = gr.Button("🔄 Update", variant="primary")
-                    plot_axis = gr.Radio(["Log", "Linear"], value="Log",
-                                         label="Size axis",
-                                         info="Log suits sizes spanning orders of magnitude")
+                    plot_axis = gr.Radio(["Log", "Linear"], value="Log", label="Axes")
                     plot_status = gr.Textbox(label="", interactive=False,
                                              show_label=False)
                 histogram_plot = gr.Image(label="", type="numpy", show_label=False)
@@ -556,7 +608,7 @@ def create_interface():
         # Opening an image does the same thing however it was opened: settle the
         # scale and frame, then segment. Kept as one list so the three entry
         # points cannot drift apart.
-        OPEN_OUTPUTS = [scale_image_in, tier1_status, scale_summary, point_readout,
+        OPEN_OUTPUTS = [scale_image_in, scale_message, scale_card, point_readout,
                         frame_status, header, mask_viz, segment_status, mask_choice,
                         click_mode_radio, point_type_radio, refine_viz]
         RELOAD_CANVAS = "() => { window.SCALE && window.SCALE.load(); }"
@@ -567,7 +619,7 @@ def create_interface():
         # is left on cannot disagree about the same reading.
         CHECK_OUTPUTS = [scale_span_in, scale_preview, scale_check_row,
                          scale_check_msg, scale_check_img, printed_value, printed_unit,
-                         check_value, check_unit, tabs]
+                         confirm_row, check_value, check_unit, tabs]
 
         # Nothing here re-draws the scale canvas on a tab change. Gradio unmounts
         # an inactive tab's panel and builds a fresh canvas when it is shown
@@ -579,12 +631,13 @@ def create_interface():
 
         # ---- Setup ----
         init_sam_btn.click(initialize_sam, inputs=[sam_file],
-                           outputs=[init_status, load_btn])
+                           outputs=[init_status, browse_btn])
         download_btn.click(download_model,
-                           outputs=[init_status, sam_file, download_btn, load_btn,
+                           outputs=[init_status, sam_file, download_btn, browse_btn,
                                     init_sam_btn])
-        load_btn.click(load_images_from_folder, inputs=[folder_input, microscope_choice],
-                       outputs=[load_status, gallery, tabs, microscope_choice])
+        browse_btn.click(browse_for_folder, inputs=[microscope_choice],
+                         outputs=[folder_shown, load_status, gallery, tabs,
+                                  microscope_choice])
         save_dataset_box.change(set_save_dataset, inputs=[save_dataset_box],
                                 outputs=[save_dataset_box])
 
@@ -594,15 +647,15 @@ def create_interface():
         app.load(restore_session, outputs=[gallery, load_status])
         app.load(current_save_dataset, outputs=[save_dataset_box])
         app.load(restore_setup,
-                 outputs=[sam_file, download_btn, init_sam_btn, init_status, load_btn,
-                          microscope_choice])
+                 outputs=[sam_file, download_btn, init_sam_btn, init_status, browse_btn,
+                          microscope_choice, folder_shown])
         app.load(current_frame_controls,
                  outputs=[particle_choice, crop_manual, crop_override,
                           min_particle_size_slider])
         # The image being worked on, as it was: its scale and canvas, its
         # candidates, its outlines. Nothing is detected or segmented again.
         app.load(restore_scale_tab,
-                 outputs=[scale_image_in, tier1_status, scale_summary, point_readout,
+                 outputs=[scale_image_in, scale_message, scale_card, point_readout,
                           frame_status]
                  ).then(lambda: check_outputs()[:-1] + (gr.update(),),
                         outputs=CHECK_OUTPUTS).then(None, js=RELOAD_CANVAS)
@@ -623,15 +676,15 @@ def create_interface():
         # ---- Scale & Frame ----
         canvas_mode.change(
             set_canvas_mode, inputs=[canvas_mode],
-            outputs=[tier2_controls, tier3_controls],
+            outputs=[box_controls, point_controls],
         ).then(
             None, inputs=[canvas_mode],
-            js="(m) => { window.SCALE && window.SCALE.setMode("
-               "m.startsWith('Tier 3') ? 'points' : 'box'); }",
+            js="(m) => { window.SCALE && window.SCALE.setMode(m); }",
         )
 
         read_box_btn.click(read_box_scale, inputs=[scale_box_out],
-                           outputs=[tier_status, scale_summary]).then(
+                           outputs=[scale_message, scale_card]).then(
+            frame_summary, outputs=[frame_status]).then(
             frame_header, outputs=[header]).then(
             check_outputs, outputs=CHECK_OUTPUTS)
 
@@ -641,26 +694,30 @@ def create_interface():
 
         apply_points_btn.click(
             apply_two_points, inputs=[scale_points_out, bar_value, bar_unit],
-            outputs=[tier_status, scale_summary]).then(
+            outputs=[scale_message, scale_card]).then(
+            frame_summary, outputs=[frame_status]).then(
             frame_header, outputs=[header]).then(
             check_outputs, outputs=CHECK_OUTPUTS)
 
-        reset_canvas_btn.click(None, js="() => { window.SCALE && window.SCALE.reset(); }")
+        for reset in (reset_box_btn, reset_points_canvas_btn):
+            reset.click(None, js="() => { window.SCALE && window.SCALE.reset(); }")
 
         confirm_scale_btn.click(confirm_scale, inputs=[printed_value, printed_unit],
-                                outputs=[tier_status, scale_summary]).then(
+                                outputs=[confirm_message, scale_card]).then(
             frame_header, outputs=[header]).then(
             check_outputs, outputs=CHECK_OUTPUTS)
-        clear_scale_btn.click(clear_scale,
-                              outputs=[tier_status, scale_summary]).then(
+        detect_again_btn.click(
+            detect_scale_again,
+            outputs=[scale_image_in, scale_message, scale_card, point_readout,
+                     frame_status]).then(
             frame_header, outputs=[header]).then(
-            check_outputs, outputs=CHECK_OUTPUTS)
+            check_outputs, outputs=CHECK_OUTPUTS).then(None, js=RELOAD_CANVAS)
 
         # Accepting from the working tab, so checking a reading costs a glance
         # and a click rather than a trip to another tab and back.
         scale_check_btn.click(
             accept_from_work_tab, inputs=[check_value, check_unit],
-            outputs=CHECK_OUTPUTS + [header, scale_summary])
+            outputs=CHECK_OUTPUTS + [header, scale_card])
 
         def _toggle_crop(manual):
             """Show the trim field only while the override is on; off returns to

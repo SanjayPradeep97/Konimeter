@@ -499,3 +499,37 @@ class TestZeroBorderBufferClearsNothing:
         analyzer = ParticleAnalyzer(conversion_factor=1.0, min_size=30)
         analyzer.analyze_mask(mask, remove_border=True, border_buffer=4)
         assert not analyzer.mask[:4, :].any()
+
+
+class TestAspectRatio:
+    """Length over width, which tells a fibre from a compact particle."""
+
+    def ratios(self, mask):
+        analyzer = ParticleAnalyzer(conversion_factor=2.0, min_size=5)
+        analyzer.analyze_mask(mask, remove_border=False)
+        return analyzer.get_measurements()["aspect_ratios"]
+
+    def test_a_disc_is_round(self):
+        mask, _ = make_disk_mask(shape=(200, 200), centers_radii=((100, 100, 30),))
+        assert self.ratios(mask) == [pytest.approx(1.0, abs=0.05)]
+
+    def test_a_rod_is_as_long_as_it_is_thin(self):
+        mask = np.zeros((200, 200), dtype=bool)
+        mask[95:105, 40:100] = True                     # 60 by 10
+        assert self.ratios(mask) == [pytest.approx(6.0, rel=0.05)]
+
+    def test_a_line_one_pixel_wide_is_long_not_infinite(self):
+        # Cleaning removes lines this thin from a mask, so measured directly.
+        from skimage import measure
+        from sem_particle_analysis.analysis import aspect_ratio
+
+        mask = np.zeros((100, 100), dtype=np.uint8)
+        mask[50, 20:60] = 1
+        (region,) = measure.regionprops(mask)
+        assert np.isfinite(aspect_ratio(region)) and aspect_ratio(region) > 10
+
+    def test_it_does_not_depend_on_the_scale(self):
+        mask, _ = make_disk_mask(shape=(200, 200), centers_radii=((100, 100, 30),))
+        analyzer = ParticleAnalyzer(conversion_factor=None)
+        analyzer.analyze_mask(mask, remove_border=False)
+        assert analyzer.get_measurements()["aspect_ratios"] == self.ratios(mask)

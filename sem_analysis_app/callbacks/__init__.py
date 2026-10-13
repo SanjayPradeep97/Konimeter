@@ -2,6 +2,7 @@
 
 from .setup import (
     CHECKPOINTS_FOUND,
+    browse_for_folder,
     CHECKPOINTS_MISSING,
     current_save_dataset,
     download_model,
@@ -23,6 +24,7 @@ from .scale_tab import (
     clear_crop_override,
     clear_scale,
     current_frame_controls,
+    detect_scale_again,
     confirm_scale,
     frame_header,
     frame_summary,
@@ -76,6 +78,7 @@ __all__ = [
     "apply_refinement_changes",
     "apply_two_points",
     "auto_process_current_image",
+    "browse_for_folder",
     "check_and_remove_duplicates",
     "check_outputs",
     "CHECKPOINTS_FOUND",
@@ -90,6 +93,7 @@ __all__ = [
     "current_frame_controls",
     "current_save_dataset",
     "delete_result_row",
+    "detect_scale_again",
     "download_model",
     "export_results",
     "frame_header",

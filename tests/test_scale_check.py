@@ -293,16 +293,19 @@ class TestWhatTheInterfaceIsTold:
         from sem_analysis_app.callbacks import scale_tab
 
         app_state.scale_calibration = box_ocr_calibration()
-        *_, value, unit, work_value, work_unit, _tab = scale_tab.check_outputs()
+        *_, value, unit, row, work_value, work_unit, _tab = scale_tab.check_outputs()
         assert (value["value"], unit["value"]) == (1.0, "µm")
         assert value["visible"] and work_value["visible"]
+        assert row["visible"], "the value and its Confirm button are offered"
 
     def test_metadata_has_no_value_to_correct(self, app_state):
         from sem_analysis_app.callbacks import scale_tab
 
         app_state.scale_calibration = sc.ScaleCalibration(nm_per_px=2.5, method="metadata")
-        *_, value, _unit, _wv, _wu, _tab = scale_tab.check_outputs()
-        assert value["visible"] is False
+        _span, preview, *_, value, _unit, row, _wv, _wu, _tab = scale_tab.check_outputs()
+        assert value["visible"] is False and row["visible"] is False
+        # Nothing was measured on the image, so there is no picture of it.
+        assert preview["visible"] is False
 
     def test_the_span_channel_carries_the_measurement(self, app_state, bar_frame):
         import json
@@ -528,3 +531,117 @@ class TestCorrectingTheBarsValue:
         app_state.scale_calibration = box_ocr_calibration(scale_nm=1000.0,
                                                           nm_per_px=1000.0 / 128)
         assert scale_tab.review()[0] is None
+
+
+class TestTheScalePanel:
+    """A value, where it came from, and a badge saying whether to look again."""
+
+    def card(self, app_state, cal):
+        from sem_analysis_app.callbacks import scale_tab
+
+        app_state.current_image = np.zeros((100, 100), np.uint8)
+        app_state.scale_calibration = cal
+        return scale_tab.scale_card()
+
+    def test_metadata_names_the_maker(self, app_state):
+        card = self.card(app_state, sc.ScaleCalibration(nm_per_px=8.993,
+                                                        method="metadata", detail="fei"))
+        assert "8.993" in card and "FEI / Thermo Fisher metadata" in card
+        assert "From file" in card
+
+    def test_a_bar_reading_waits_for_a_look(self, app_state):
+        card = self.card(app_state, box_ocr_calibration())
+        assert "Scale bar: 1 µm over 128 px" in card and "Unconfirmed" in card
+
+    def test_a_confirmed_reading_says_so(self, app_state):
+        card = self.card(app_state, box_ocr_calibration(confirmed=True))
+        assert "Confirmed" in card and "Unconfirmed" not in card
+
+    def test_a_warning_is_shown_with_it(self, app_state):
+        card = self.card(app_state, box_ocr_calibration(warning="Unusual bar value"))
+        assert "Check" in card and "Unusual bar value" in card
+
+    def test_a_corrected_value_shows_what_was_read(self, app_state):
+        cal = sc.relabelled(box_ocr_calibration(scale_nm=40000.0,
+                                                nm_per_px=40000.0 / 128), 10, "µm")
+        card = self.card(app_state, cal)
+        assert "10 µm (read as 40 µm)" in card
+
+    def test_no_scale(self, app_state):
+        card = self.card(app_state, None)
+        assert "Not set" in card and "pixels" in card
+
+    def test_text_from_the_file_cannot_become_markup(self, app_state):
+        card = self.card(app_state, box_ocr_calibration(warning="<b>bold</b>"))
+        assert "<b>bold</b>" not in card
+
+
+class TestTheFramePanel:
+    @pytest.fixture
+    def frame(self, app_state, monkeypatch):
+        from sem_particle_analysis import modality
+
+        monkeypatch.setattr(app_state, "current_image", np.zeros((100, 100), np.uint8))
+        monkeypatch.setattr(app_state, "particle_choice", "auto")
+        monkeypatch.setattr(app_state, "crop_percent", 6.25)
+        monkeypatch.setattr(app_state, "region_info",
+                            {"analysable_fraction": 0.95, "blocked_fraction": 0.05})
+        monkeypatch.setattr(app_state, "microscope", "SEM")
+        monkeypatch.setattr(app_state, "modality", modality.Modality(
+            kind="SEM", instrument="fei", from_metadata=True))
+        return app_state
+
+    def test_it_lists_what_was_decided(self, frame):
+        from sem_analysis_app.callbacks import scale_tab
+
+        table = scale_tab.frame_summary()
+        for text in ("SEM", "Brighter than background", "Cropped, 6.2% of height",
+                     "5.0% of frame", "beam-blocked area"):
+            assert text in table
+
+    def test_a_file_that_disagrees_is_pointed_out(self, frame):
+        from sem_particle_analysis import modality
+        from sem_analysis_app.callbacks import scale_tab
+
+        frame.modality = modality.Modality(kind="TEM", instrument="jeol",
+                                           from_metadata=True)
+        assert "The file says TEM (JEOL)." in scale_tab.frame_summary()
+
+    def test_an_unset_microscope_asks_for_one(self, frame):
+        from sem_particle_analysis import modality
+        from sem_analysis_app.callbacks import scale_tab
+
+        frame.microscope = None
+        frame.modality = modality.Modality()
+        table = scale_tab.frame_summary()
+        assert "Not set" in table and "Setup tab" in table
+
+
+class TestMeasuringByHand:
+    def test_the_length_is_typed_as_text(self, app_state):
+        from sem_analysis_app.callbacks import scale_tab
+
+        app_state.current_image = np.zeros((1000, 1000), np.uint8)
+        points = '{"points": [[100, 950], [300, 950]]}'
+        message, _card = scale_tab.apply_two_points(points, " 500 ", "nm")
+        assert message.startswith("✓")
+        assert app_state.scale_calibration.nm_per_px == pytest.approx(2.5)
+
+    def test_something_that_is_not_a_number_is_refused(self, app_state):
+        from sem_analysis_app.callbacks import scale_tab
+
+        points = '{"points": [[100, 950], [300, 950]]}'
+        for typed in ("", None, "five hundred"):
+            message, _card = scale_tab.apply_two_points(points, typed, "nm")
+            assert "Enter the length" in message
+        assert app_state.scale_calibration is None
+
+    def test_detecting_again_forgets_the_scale_set_by_hand(self, app_state, monkeypatch):
+        from sem_analysis_app.callbacks import scale_tab
+
+        forgotten = []
+        monkeypatch.setattr(app_state, "forget_scale", lambda: forgotten.append(True))
+        monkeypatch.setattr(scale_tab, "prepare_scale_tab", lambda: ("payload",))
+        app_state.scale_calibration = sc.from_two_points((0, 0), (100, 0), 1, "µm")
+        assert scale_tab.detect_scale_again() == ("payload",)
+        assert forgotten and app_state.scale_calibration is None

@@ -24,6 +24,7 @@ def measurements(n, nm=True):
     return {"num_particles": n, "areas_px": areas, "diameters_px": [10.0] * n,
             "areas": [a * 4 for a in areas] if nm else [],
             "diameters": [20.0] * n if nm else [],
+            "aspect_ratios": [1.5] * n,
             "unit": "nm" if nm else "pixels", "nm_per_px": 2.0 if nm else None}
 
 
@@ -108,7 +109,26 @@ class TestSummaries:
         assert choices["choices"] == ["A_0001.tif", "B_0002.tif"]
 
         _plot, status = update_histogram_plots()
-        assert "1 particle from 2 images" in status and "2 more" in status
+        assert "3 particles from 2 images" in status
+        assert "2 were measured without a scale" in status
+
+    def test_shape_needs_no_scale(self, folder):
+        from sem_analysis_app.callbacks.plots import update_histogram_plots
+
+        state.results_manager.add_result("B_0002.tif", measurements(2, nm=False))
+        plot, status = update_histogram_plots()
+        assert status.startswith("✅") and plot.ndim == 3
+        assert "2 were measured without a scale" in status
+
+    def test_frames_saved_before_aspect_ratio_are_named(self, folder):
+        from sem_analysis_app.callbacks.plots import update_histogram_plots
+
+        older = measurements(2)
+        del older["aspect_ratios"]
+        state.results_manager.add_result("A_0001.tif", older)
+        state.results_manager.add_result("B_0002.tif", measurements(1))
+        _plot, status = update_histogram_plots()
+        assert "2 were saved before aspect ratio was recorded" in status
 
     @pytest.mark.parametrize("axis", ["Log", "Linear"])
     def test_sizes_plot_on_either_axis(self, folder, axis):

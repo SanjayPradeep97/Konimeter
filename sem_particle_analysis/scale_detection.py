@@ -1061,23 +1061,14 @@ class ScaleDetector:
                     f"micron reading it implies ({scale_nm:g} nm) is not a standard "
                     f"bar value. Set the scale manually."
                 )
-            warning = (
-                f"Unit unreadable in '{ocr_text}' — assumed µm, giving "
-                f"{scale_nm / 1000:g} µm / {pixel_length}px. Confirm against the "
-                f"image before trusting these measurements."
-            )
+            warning = (f"Unit not readable in “{ocr_text.strip()}”, so µm was "
+                       f"assumed. Check the bar's value.")
         elif not self._is_standard_scale_value(scale_nm):
-            warning = (
-                f"Scale bar read as {scale_nm:g} nm from OCR text '{ocr_text}', "
-                f"which is not a standard bar value — most likely a misread digit "
-                f"(1 and 7 are commonly confused). Confirm against the image."
-            )
+            warning = (f"Unusual bar value read from “{ocr_text.strip()}”, "
+                       f"possibly a misread digit. Check the bar's value.")
         elif spanned_crop:
-            warning = (
-                f"Measured bar ({pixel_length}px) runs the full width of the search "
-                f"region, so its true ends may be outside the box. Widen the region "
-                f"so there is background on both sides of the bar, then re-detect."
-            )
+            warning = ("The bar reaches the edge of the area searched, so it may "
+                       "be longer. Check both ends.")
         elif len(candidates) > 1:
             # Genuine ambiguity means the polarity that lost also found something
             # bar-like of comparable size. Both polarities almost always find
@@ -1091,13 +1082,8 @@ class ScaleDetector:
             comparable = rival["area"] >= self.AMBIGUOUS_POLARITY_AREA_RATIO * winner["area"]
             differs = abs(rival["length"] - winner["length"]) > 0.1 * winner["length"]
             if comparable and differs:
-                warning = (
-                    f"Ambiguous scale bar: bright polarity measured "
-                    f"{candidates['bright']['length']}px, dark polarity "
-                    f"{candidates['dark']['length']}px, and both look equally like a "
-                    f"bar. Used '{best_polarity}' ({winner['length']}px). Verify the "
-                    f"overlay, or set polarity explicitly."
-                )
+                warning = ("Two different bars could have been measured. Check "
+                           "that the marked span covers the scale bar.")
 
         # What to leave out of analysis when the bar is printed on the picture:
         # the bar and the text on the label's line, not the whole search region.

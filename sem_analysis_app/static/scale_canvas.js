@@ -65,8 +65,11 @@
     const c = canvas();
     if (!c || !S.iw) return;
     const wrap = c.parentElement;
-    const maxW = Math.max(320, wrap.clientWidth - 4);
-    const maxH = 620;
+    const maxW = Math.max(320, wrap.clientWidth);
+    // As tall as the window allows below the stage's top, so the whole frame
+    // and the panel beside it are in view together.
+    const top = wrap.getBoundingClientRect().top + window.scrollY;
+    const maxH = Math.max(380, window.innerHeight - top - 24);
     const s = Math.min(maxW / S.iw, maxH / S.ih, 1);
     c.width = Math.round(S.iw * s);
     c.height = Math.round(S.ih * s);
@@ -329,6 +332,9 @@
     if (S.mode === "box" && S.drag) {
       S.drag = null;
       normaliseBox();
+      // A click without a drag is not a box; leave none rather than a speck
+      // that dims the whole frame around it.
+      if (S.box.x1 - S.box.x0 < 4 || S.box.y1 - S.box.y0 < 4) S.box = null;
       commitBox();
       draw();
     }
@@ -361,10 +367,11 @@
   // measurement will be taken in.
   const toOriginal = (v) => v / (S.pxScale || 1);
 
-  const commitBox = () => S.box && pushTo("scale_box_out", {
+  // No box is committed as an empty one, so Read never uses the last image's.
+  const commitBox = () => pushTo("scale_box_out", S.box ? {
     x0: Math.round(toOriginal(S.box.x0)), y0: Math.round(toOriginal(S.box.y0)),
     x1: Math.round(toOriginal(S.box.x1)), y1: Math.round(toOriginal(S.box.y1)),
-  });
+  } : {});
 
   const commitPoints = () => pushTo("scale_points_out", {
     points: S.points.map(([x, y]) =>
@@ -397,13 +404,14 @@
         // Python sends the region automatic detection used, when it found one,
         // so the analyst sees what was measured instead of a generic guess. It
         // arrives in original-frame coordinates, like everything else crossing
-        // this boundary.
+        // this boundary. With no scale found, a starting box is offered where
+        // bars usually are; a scale from the metadata gets no box at all.
         S.box = data.box ? {
           x0: clamp(data.box.x0 * S.pxScale, 0, S.iw),
           y0: clamp(data.box.y0 * S.pxScale, 0, S.ih),
           x1: clamp(data.box.x1 * S.pxScale, 0, S.iw),
           y1: clamp(data.box.y1 * S.pxScale, 0, S.ih),
-        } : defaultBox();
+        } : (data.suggest ? defaultBox() : null);
         fitView();
         // Both channels, so Apply on this image never measures with the last
         // image's clicks, which would no longer be drawn anywhere.

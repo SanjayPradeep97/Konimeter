@@ -44,3 +44,32 @@ def test_export_fills_both_of_its_outputs(app):
     assert handlers, "Export is not wired to anything"
     for handler in handlers:
         assert len(handler.outputs) == len(returned)
+
+
+@pytest.mark.parametrize("name, returned", [
+    ("browse_for_folder", 5),
+    ("restore_setup", 7),
+    ("detect_scale_again", 5),
+    ("check_outputs", 11),
+    ("read_box_scale", 2),
+    ("apply_two_points", 2),
+    ("confirm_scale", 2),
+])
+def test_scale_and_setup_handlers_fill_their_outputs(app, name, returned):
+    handlers = wired(app, name)
+    assert handlers, f"{name} is not wired to anything"
+    for handler in handlers:
+        assert len(handler.outputs) == returned
+
+
+def test_check_outputs_returns_what_it_is_wired_to(app):
+    from sem_analysis_app.callbacks import check_outputs
+
+    assert len(check_outputs()) == 11
+
+
+def test_there_is_no_typed_folder_path(app):
+    # The folder is chosen in the system's dialog; nothing on the page takes a
+    # typed path to it any more.
+    labels = [getattr(block, "label", None) for block in app.blocks.values()]
+    assert "Image folder" not in labels

@@ -118,6 +118,9 @@ class ResultsManager:
         # image's measurements — is indistinguishable in the results from a pixel
         # size the instrument itself recorded. An empty cell means the column did
         # not exist when the row was written.
+        #
+        # aspect_ratios is each particle's length over width, the same with or
+        # without a scale; it is how fibres are told from compact particles.
         self.columns = [
             "file_name",
             "num_particles",
@@ -126,7 +129,8 @@ class ResultsManager:
             "particle_areas_px",
             "equiv_diameters_px",
             "particle_areas_nm2",
-            "equiv_diameters_nm"
+            "equiv_diameters_nm",
+            "aspect_ratios",
         ]
 
         # Create or load CSV
@@ -239,7 +243,8 @@ class ResultsManager:
             "particle_areas_px": serialise_measurements(areas_px),
             "equiv_diameters_px": serialise_measurements(diams_px),
             "particle_areas_nm2": serialise_measurements(areas_nm2),
-            "equiv_diameters_nm": serialise_measurements(diams_nm)
+            "equiv_diameters_nm": serialise_measurements(diams_nm),
+            "aspect_ratios": serialise_measurements(measurements.get('aspect_ratios', [])),
         }
 
         # Append in the order this file's header actually uses. Writing a fixed
