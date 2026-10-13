@@ -20,7 +20,7 @@ def _particle_polarity():
     """
     Whether particles are expected to be the darker side of the frame, or None.
 
-    An explicit choice wins; otherwise the detected instrument decides, since
+    An explicit choice wins; otherwise the microscope decides, since
     electron-dense material in TEM bright field reads darker than the support
     film and material on an SEM substrate usually reads brighter. It orders the
     candidates and never hides any, so a wrong expectation costs a click.
@@ -28,7 +28,7 @@ def _particle_polarity():
     chosen = getattr(state, "particle_choice", "auto") or "auto"
     if chosen != "auto":
         return POLARITY_CHOICES[chosen]
-    return state.modality.dark_particles if state.modality else None
+    return {"SEM": False, "TEM": True}.get(state.microscope_kind())
 
 
 def _rank_and_show():
@@ -105,6 +105,17 @@ def set_particle_polarity(choice):
         tuple: (candidate image, status, mask_choice update)
     """
     state.particle_choice = choice or "auto"
+    return rerank()
+
+
+def rerank():
+    """
+    Re-sort the candidates SAM already returned, after the expectation of which
+    way round the particles are has changed.
+
+    Returns:
+        tuple: (candidate image, status, mask_choice update)
+    """
     segmenter = state.segmenter
     if (segmenter is None or getattr(segmenter, "masks", None) is None
             or state.cropped_image is None

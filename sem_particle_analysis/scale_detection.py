@@ -117,7 +117,8 @@ class ScaleDetector:
     # 1 µm, ...). A parsed value off this grid — "7 µm", "1100 nm" — is nearly
     # always a misread digit, and a misread digit is a multiplicative error in
     # every measurement, so such results are flagged for manual confirmation.
-    STANDARD_MANTISSAS = (1.0, 1.5, 2.0, 2.5, 3.0, 5.0)
+    # AMT TEM cameras also label bars 400 nm and 600 nm.
+    STANDARD_MANTISSAS = (1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0)
 
     # Databar geometry. Instruments put the acquisition information in a solid
     # strip below the micrograph; these bound what counts as one.
@@ -257,6 +258,13 @@ class ScaleDetector:
         Raises:
             ValueError: If no scale information found in metadata
         """
+        # A JEOL SEM writes the scale to a .txt beside the image rather than into
+        # it, for any image format, so that is looked for first.
+        from_sidecar = self._scale_from_sidecar(file_path)
+        if from_sidecar is not None:
+            self.last_detection = from_sidecar
+            return from_sidecar
+
         # Checked by name first, so a PNG or JPEG gets the reason rather than a
         # TIFF reader's error with the file's full path in it.
         if os.path.splitext(str(file_path))[1].lower() not in (".tif", ".tiff"):
@@ -307,6 +315,14 @@ class ScaleDetector:
                 metadata_source = 'TESCAN metadata'
                 confidence = 'medium'
 
+        # An AMT camera (on many TEMs) writes its calibration as text.
+        if pixel_size_nm is None and image_desc:
+            pixel_size_nm = self._parse_amt_description(image_desc)
+            if pixel_size_nm:
+                metadata_source = 'AMT camera calibration (XpixCal)'
+                confidence = 'high'
+                manufacturer = 'amt'
+
         # Try generic pixel size patterns in ImageDescription
         if pixel_size_nm is None and image_desc:
             pixel_size_nm = self._parse_generic_pixel_size(image_desc)
@@ -343,17 +359,10 @@ class ScaleDetector:
                     confidence = 'high'
                     manufacturer = 'fei'
 
-        # Last, the generic resolution tags. Most programs fill them with a print
-        # resolution, not the microscope's calibration, so a value from here is
-        # flagged for the analyst to confirm against the scale bar.
-        generic_resolution = False
-        if pixel_size_nm is None:
-            pixel_size_nm = self._parse_generic_resolution(metadata)
-            if pixel_size_nm:
-                metadata_source = 'TIFF XResolution/YResolution tags'
-                confidence = 'low'
-                generic_resolution = True
-
+        # The TIFF's own XResolution/YResolution tags are deliberately not used:
+        # programs fill them with a print resolution. On the 17 files in the test
+        # set that had nothing else, every one was wrong, by a factor of up to
+        # 130,000.
         if pixel_size_nm is None:
             raise ValueError(
                 f"No scale information found in TIFF metadata. "
@@ -374,7 +383,6 @@ class ScaleDetector:
             'manufacturer': manufacturer,
             'confidence': confidence,
             'metadata_source': metadata_source,
-            'generic_resolution': generic_resolution,
             'raw_metadata': metadata
         }
 
@@ -543,8 +551,10 @@ class ScaleDetector:
         if not isinstance(tag_value, dict):
             return None
 
-        # Primary: ap_pixel_size tuple -> ('Pixel Size', 26.37, 'nm')
-        for key in ('ap_pixel_size', 'ap_image_pixel_size'):
+        # Primary: the stored image's pixel size. ap_pixel_size refers to the
+        # instrument's reference scan, and an image stored at 2048 x 1536 has
+        # half of it: taking ap_pixel_size made such frames twice too large.
+        for key in ('ap_image_pixel_size', 'ap_pixel_size'):
             entry = tag_value.get(key)
             if isinstance(entry, (tuple, list)) and len(entry) >= 3:
                 try:
@@ -600,6 +610,7 @@ class ScaleDetector:
         # in metres. A bare "Pixel Size" is left to the generic parser rather
         # than guessed at.
         patterns = [
+            (r'Image\s*Pixel\s*Size\s*=\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)\b', None),
             (r'Pixel\s*Size\s*=\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)\b', None),
             (r'AP_PIXEL_SIZE\s*=\s*([0-9.eE+-]+)\s*(nm|um|µm|μm|mm|m)\b', None),
             (r'AP_PIXEL_SIZE\s*=\s*([0-9.eE+-]+)', "m"),
@@ -739,56 +750,64 @@ class ScaleDetector:
 
         return None
 
-    # Standard display/scanner DPI values that are NOT SEM calibration
-    STANDARD_DPI_VALUES = {72, 96, 150, 192, 200, 240, 300, 360, 600}
-
-    def _parse_generic_resolution(self, metadata):
+    def _scale_from_sidecar(self, file_path):
         """
-        Parse standard TIFF XResolution/YResolution tags.
-
-        These tags specify pixels per unit (where unit is defined by ResolutionUnit).
-        ResolutionUnit: 1=none, 2=inch, 3=centimeter
-
-        Args:
-            metadata (dict): Metadata dict from extract_tiff_metadata()
-
-        Returns:
-            float: Pixel size in nanometers, or None if not found
+        The pixel size from a JEOL SEM's .txt beside the image, as a result dict
+        like detect_scale_from_metadata's, or None.
         """
-        x_res = metadata.get('x_resolution')
-        y_res = metadata.get('y_resolution')
-        res_unit = metadata.get('resolution_unit')
+        from .sidecar import parse_jeol, read_sidecar
 
-        # Need at least one resolution value
-        resolution = x_res or y_res
-        if resolution is None or resolution <= 0:
+        info = parse_jeol(read_sidecar(file_path))
+        if not info or not info.get("nm_per_px"):
+            return None
+        nm_per_px = info["nm_per_px"]
+        # The bar was drawn for the resolution the sidecar records; an image
+        # saved at another size has proportionally larger or smaller pixels.
+        width = self._image_width(file_path)
+        if info.get("width") and width and width != info["width"]:
+            nm_per_px *= info["width"] / width
+        nm_per_px, validity, msg = self._validate_pixel_size(nm_per_px, "JEOL sidecar")
+        if validity == 'invalid':
+            return None
+        return {
+            'pixel_size_nm': nm_per_px,
+            'conversion': nm_per_px,
+            'scale_nm': nm_per_px,
+            'pixel_length': 1,
+            'manufacturer': 'jeol',
+            'confidence': 'high',
+            'metadata_source': 'JEOL .txt beside the image (SM_MICRON_BAR)',
+            'raw_metadata': info,
+        }
+
+    @staticmethod
+    def _image_width(file_path):
+        try:
+            from PIL import Image
+            with Image.open(file_path) as handle:
+                return handle.size[0]
+        except Exception:
             return None
 
-        # Reject standard display/scanner DPI values that are meaningless for SEM
-        if res_unit in (2, 3) and resolution in self.STANDARD_DPI_VALUES:
-            logger.info(f"Ignoring standard DPI value {resolution} (not SEM calibration)")
+    @staticmethod
+    def _parse_amt_description(image_desc):
+        """
+        Pixel size from an AMT camera's ImageDescription, or None.
+
+        AMT writes calibration lines such as ``XpixCal=620.662000`` (pixels per
+        unit) and ``Unit=um``.
+        """
+        cal = re.search(r'XpixCal\s*=\s*([0-9.eE+-]+)', image_desc)
+        unit = re.search(r'\bUnit\s*=\s*(nm|um|µm|μm|mm)\b', image_desc)
+        if not cal or not unit:
             return None
-
-        # ResolutionUnit: 2=inch, 3=centimeter
-        # pixels_per_unit is the resolution value
-        # pixel_size = 1 / pixels_per_unit (in that unit)
-
-        if res_unit == 2:  # Inch
-            # resolution = pixels per inch
-            # pixel_size_inch = 1 / resolution
-            # pixel_size_nm = pixel_size_inch * 25.4e6 (25.4 mm/inch, 1e6 nm/mm)
-            pixel_size_nm = 25.4e6 / resolution
-            return pixel_size_nm
-
-        elif res_unit == 3:  # Centimeter
-            # resolution = pixels per cm
-            # pixel_size_cm = 1 / resolution
-            # pixel_size_nm = pixel_size_cm * 1e7 (1e7 nm/cm)
-            pixel_size_nm = 1e7 / resolution
-            return pixel_size_nm
-
-        # Unit 1 (none) or unknown - can't determine scale
-        return None
+        try:
+            per_unit = float(cal.group(1))
+            if per_unit <= 0:
+                return None
+            return _length_to_nm(1.0, unit.group(1)) / per_unit
+        except ValueError:
+            return None
 
     def _parse_generic_pixel_size(self, image_desc):
         """
@@ -921,60 +940,95 @@ class ScaleDetector:
         max_thickness = max(self.MIN_BAR_THICKNESS_PX,
                             int(round(H * self.MAX_BAR_THICKNESS_FRAC)))
 
-        candidates = {}
+        binaries = {}
         for pol in polarities_to_try:
             if pol == 'bright':
                 _, binary255 = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
             else:
                 _, binary255 = cv2.threshold(gray, 255 - threshold, 255, cv2.THRESH_BINARY_INV)
+            binaries[pol] = binary255
+        colour = self._colour_mask(crop)
+        if colour is not None and polarity == 'auto':
+            binaries['colour'] = colour.astype(np.uint8) * 255
 
-            line = self._find_scale_line_morphological(binary255, max_thickness=max_thickness)
-            if line is not None:
-                leftmost, rightmost, row, spanned, area = line
-                candidates[pol] = {"length": rightmost - leftmost + 1, "area": area}
-                # A bar with clear background on both sides always beats one that
-                # ran to the crop edge, regardless of size. Otherwise the larger
-                # solid rule wins: comparing the two polarities on width alone let
-                # a wide, ragged run through background beat the real bar, which
-                # is what put the wrong polarity on most of the TEM frames.
-                better = (
-                    best_line is None
-                    or (best_line[3] and not spanned)
-                    or (best_line[3] == spanned and area > best_line[4])
-                )
-                if better:
-                    best_line = line
-                    best_binary = binary255
-                    best_polarity = pol
-
-        if best_line is None:
+        # The label first, then the bar beside it. Searching for the bar on its
+        # own measured whatever line was largest in the region: a databar's
+        # divider, one half of an FEI bar split by its label, a tick's outer edge.
+        tokens = self._read_tokens(crop)
+        labels = self._label_candidates(tokens)
+        ocr_text = " ".join(t["text"] for t in tokens)
+        found = None
+        for label in labels:
+            # The bar is drawn in its label's colour, whatever that is: a fixed
+            # threshold missed the mid-grey bar FEI prints on small frames.
+            options = self._binaries_like_label(gray, binaries, label["box"])
+            found = self._bar_beside_label(options, label, max_thickness)
+            if found is not None:
+                break
+        if labels and found is None:
+            # A label with no bar beside it here: the bar lies outside this
+            # region. Falling back to the largest line in the region measured
+            # something else; better that the next region is tried.
             raise ValueError(
-                "No scale bar line found in region. "
-                "Try adjusting the region position, polarity, or threshold."
-            )
+                f"Read the label '{labels[0]['line_text']}' but found no bar beside "
+                "it in this region.")
 
-        leftmost, rightmost, top_row, spanned_crop, _bar_area = best_line
-        # Both columns are the bar's own pixels, so it covers one more than
-        # their difference; dropping the one overstated nm/px by 1/length.
-        pixel_length = rightmost - leftmost + 1
+        candidates = {}
+        salvaged = False
+        if found is not None:
+            best_polarity, best_binary, leftmost, rightmost, top_row, pixel_length, label_box = found
+            best_polarity = best_polarity.split("-")[0]       # "dark-ink" is dark
+            # Running into the region's edge means the bar may continue beyond it.
+            spanned_crop = leftmost <= 0 or rightmost >= box_w - 1
+            scale_nm = label["nm"]
+            ocr_text = label["line_text"] or ocr_text
+        else:
+            label_box = None
+            for pol, binary255 in binaries.items():
+                line = self._find_scale_line_morphological(binary255, max_thickness=max_thickness)
+                if line is not None:
+                    leftmost, rightmost, row, spanned, area = line
+                    candidates[pol] = {"length": rightmost - leftmost + 1, "area": area}
+                    # A bar with clear background on both sides always beats one
+                    # that ran to the crop edge, regardless of size. Otherwise the
+                    # larger solid rule wins: comparing the two polarities on width
+                    # alone let a wide, ragged run through background beat the real
+                    # bar, which is what put the wrong polarity on most TEM frames.
+                    better = (
+                        best_line is None
+                        or (best_line[3] and not spanned)
+                        or (best_line[3] == spanned and area > best_line[4])
+                    )
+                    if better:
+                        best_line = line
+                        best_binary = binary255
+                        best_polarity = pol
+
+            if best_line is None:
+                raise ValueError(
+                    "No scale bar line found in region. "
+                    "Try adjusting the region position, polarity, or threshold."
+                )
+
+            leftmost, rightmost, top_row, spanned_crop, _bar_area = best_line
+            # Both columns are the bar's own pixels, so it covers one more than
+            # their difference; dropping the one overstated nm/px by 1/length.
+            pixel_length = rightmost - leftmost + 1
+
+            # Extract scale value and units
+            try:
+                scale_nm = self._parse_scale_text(ocr_text)
+            except ValueError:
+                scale_nm = self._salvage_micron_reading(ocr_text)
+                if scale_nm is None:
+                    raise
+                salvaged = True
 
         if pixel_length < 5:
             raise ValueError(
                 f"Detected line too short ({pixel_length}px). "
                 f"Adjust region to cover the scale bar."
             )
-
-        ocr_text = self._read_text(crop)
-
-        # Extract scale value and units
-        salvaged = False
-        try:
-            scale_nm = self._parse_scale_text(ocr_text)
-        except ValueError:
-            scale_nm = self._salvage_micron_reading(ocr_text)
-            if scale_nm is None:
-                raise
-            salvaged = True
 
         # The OCR path previously trusted whatever the text parsed to. A single
         # misread character can move the value by orders of magnitude, so check
@@ -1045,9 +1099,19 @@ class ScaleDetector:
                     f"overlay, or set polarity explicitly."
                 )
 
+        # What to leave out of analysis when the bar is printed on the picture:
+        # the bar and the text on the label's line, not the whole search region.
+        mark = None
+        if label_box is not None:
+            lx0, ly0, lx1, ly1 = label_box
+            bx0, bx1 = min(lx0, leftmost), max(lx1, rightmost)
+            by0, by1 = min(ly0, top_row - max_thickness), max(ly1, top_row + max_thickness)
+            mark = (x0 + bx0, y0 + by0, bx1 - bx0 + 1, by1 - by0 + 1)
+
         # Store results
         self.last_detection = {
             'region': (x0, y0, box_w, box_h),
+            'mark': mark,
             'pixel_length': pixel_length,
             'scale_nm': scale_nm,
             'conversion': conversion,
@@ -1105,52 +1169,390 @@ class ScaleDetector:
             return None
         return value * 1000.0  # µm
 
-    def _read_text(self, crop):
-        """
-        OCR a crop, escalating effort until a digit comes back.
+    # Coloured labels and bars (the red ones some TEM exports burn in) are
+    # mid-grey once converted to greyscale, and read badly; picked out by colour
+    # instead. A pixel counts as coloured when its channels differ by this much.
+    COLOUR_CHROMA = 80
+    COLOUR_MIN_FRACTION = 0.002
 
-        A label like "1 µm" is mostly thin strokes, and at default sensitivity
-        EasyOCR routinely returns just "µm" — the value silently lost. Each
-        attempt below is progressively more aggressive; the first reading that
-        contains a digit wins, since the number is the part that matters.
+    @classmethod
+    def _colour_mask(cls, crop):
+        """Pixels of strong colour in an RGB crop, or None if there are few."""
+        if crop.ndim != 3 or crop.shape[2] < 3:
+            return None
+        rgb = crop[..., :3].astype(np.int16)
+        chroma = rgb.max(axis=2) - rgb.min(axis=2)
+        mask = chroma > cls.COLOUR_CHROMA
+        return mask if mask.mean() >= cls.COLOUR_MIN_FRACTION else None
+
+    def _read_tokens(self, crop):
+        """
+        OCR a crop and return the words with their boxes, in crop pixels.
+
+        Effort escalates, since a label like "1 µm" is mostly thin strokes and is
+        often lost at default sensitivity: the crop is enlarged first, and the
+        first reading that contains a scale label wins, otherwise the one with
+        the most text.
 
         Returns:
-            str: Recognised text, space-joined.
+            list[dict]: ``text``, ``conf`` and ``box`` (x0, y0, x1, y1).
         """
-        images = [crop]
-        height = crop.shape[0]
-        if 0 < height < self.OCR_TARGET_HEIGHT:
-            factor = min(4.0, self.OCR_TARGET_HEIGHT / height)
-            enlarged = cv2.resize(crop, None, fx=factor, fy=factor,
-                                  interpolation=cv2.INTER_CUBIC)
-            # Keep the original as a fallback so nothing that used to be
-            # readable stops being read.
-            images = [enlarged, crop]
+        sources = []
+        colour = self._colour_mask(crop)
+        if colour is not None:
+            ink = np.where(colour, 0, 255).astype(np.uint8)
+            sources.append(np.stack([ink] * 3, axis=-1))
+        sources.append(crop)
+
+        images = []
+        for source in sources:
+            height = source.shape[0]
+            if 0 < height < self.OCR_TARGET_HEIGHT:
+                factor = min(4.0, self.OCR_TARGET_HEIGHT / height)
+                images.append((cv2.resize(source, None, fx=factor, fy=factor,
+                                          interpolation=cv2.INTER_CUBIC), factor))
+            images.append((source, 1.0))
 
         attempts = [
             {},
             {"text_threshold": 0.4, "low_text": 0.3},
             {"text_threshold": 0.3, "low_text": 0.2, "allowlist": self.OCR_ALLOWLIST},
         ]
-
-        # Resolved once, outside the loop: a missing EasyOCR must surface as its
-        # own error rather than being swallowed by the per-attempt except and
-        # reported as "no text found".
         reader = self.reader
-
-        best = ""
-        for image in images:
+        best, best_length = [], -1
+        for image, factor in images:
             for options in attempts:
                 try:
                     found = reader.readtext(image, **options)
                 except Exception:
                     continue
-                text = " ".join(txt for _, txt, _ in found)
-                if any(ch.isdigit() for ch in text):
-                    return text
-                if len(text) > len(best):
-                    best = text
+                tokens = []
+                for box, text, conf in found:
+                    xs = [point[0] for point in box]
+                    ys = [point[1] for point in box]
+                    tokens.append({"text": text, "conf": float(conf),
+                                   "box": (min(xs) / factor, min(ys) / factor,
+                                           max(xs) / factor, max(ys) / factor)})
+                if self._label_candidates(tokens):
+                    return tokens
+                length = sum(len(t["text"]) for t in tokens)
+                if length > best_length:
+                    best, best_length = tokens, length
         return best
+
+    # Letters OCR returns for digits inside a number on a scale label.
+    _DIGIT_FIXES = str.maketrans({"O": "0", "o": "0", "Q": "0", "D": "0", "U": "0",
+                                  "I": "1", "l": "1", "|": "1", "S": "5", "Z": "2",
+                                  "B": "8", ",": "."})
+    _LABEL = re.compile(
+        r"^[^\w.]*([0-9OoQDUIl|SZB.,]*[0-9OoQDUIl|SZB])\s*"
+        r"(nm|uum|pum|jum|lum|ium|prn|hrn|urn|um|µm|μm|hm|hmn|mm)[^\w]*$", re.IGNORECASE)
+
+    def _label_value(self, text):
+        """
+        The length a scale label states, in nm, or None.
+
+        The whole text must be a number and a unit, so "15.0 kV" or "WD 9.0 mm"
+        never qualify; common OCR slips are repaired: letters for digits
+        ("Ium" for 1 µm), a dropped decimal point ("0 5", "05", "U2" for 0.5
+        and 0.2), and the usual misreadings of µ.
+        """
+        text = unicodedata.normalize("NFKC", text or "").strip()
+        text = re.sub(r"^(\W*)0\s+(\d)", r"\g<1>0.\2", text)        # "0 5 µm"
+        match = self._LABEL.match(text)
+        if not match:
+            return None
+        number, unit = match.group(1).translate(self._DIGIT_FIXES), match.group(2)
+        # "Mm" is µm with its µ read as M: bars are labelled "mm", never "Mm".
+        unit = "µm" if unit == "Mm" else unit.lower()
+        if not any(ch.isdigit() for ch in match.group(1)) and len(number) > 1:
+            return None
+        if number.startswith("."):
+            number = "0" + number
+        if len(number) > 1 and number[0] == "0" and number[1] != ".":
+            number = "0." + number[1:]                                 # "05", "02"
+        try:
+            value = float(number)
+        except ValueError:
+            return None
+        if unit == "hmn":
+            unit = "µm"
+        nm = value * self.UNIT_TO_NM.get(unit, self.UNIT_TO_NM.get("µm"))
+        low, high = self.VALID_SCALE_BAR_NM
+        return nm if value > 0 and low <= nm <= high else None
+
+    _INSTRUMENT_BEFORE = re.compile(r"(WD|HV|HFW|spot|dwell|curr|det|mag|=|:)\s*$", re.IGNORECASE)
+    _INSTRUMENT_AFTER = re.compile(r"^\s*(kV|pA|nA|[xX]\b|KX)", re.IGNORECASE)
+
+    def _label_candidates(self, tokens):
+        """
+        The scale labels among the words read, best first.
+
+        Words are grouped into lines, and runs of up to three neighbouring words
+        tried, so "5" and "µm" read as two words still make one label.
+
+        Returns:
+            list[dict]: ``nm``, ``box`` (crop pixels), ``line_text``, ``standard``.
+        """
+        lines = []
+        for token in sorted(tokens or (), key=lambda t: (t["box"][1] + t["box"][3]) / 2):
+            centre = (token["box"][1] + token["box"][3]) / 2
+            height = max(1.0, token["box"][3] - token["box"][1])
+            for line in lines:
+                if abs(line["centre"] - centre) <= 0.6 * max(line["height"], height):
+                    line["tokens"].append(token)
+                    break
+            else:
+                lines.append({"centre": centre, "height": height, "tokens": [token]})
+
+        found = []
+        for line in lines:
+            words = sorted(line["tokens"], key=lambda t: t["box"][0])
+            line_text = " ".join(w["text"] for w in words)
+            for i in range(len(words)):
+                for j in range(i + 1, min(i + 3, len(words)) + 1):
+                    run = words[i:j]
+                    nm = self._label_value(" ".join(w["text"] for w in run))
+                    if nm is None:
+                        continue
+                    before = " ".join(w["text"] for w in words[max(0, i - 2):i])
+                    after = " ".join(w["text"] for w in words[j:j + 1])
+                    if self._INSTRUMENT_BEFORE.search(before) or self._INSTRUMENT_AFTER.search(after):
+                        continue
+                    found.append({
+                        "nm": nm, "line_text": line_text, "words": j - i,
+                        "standard": self._is_standard_scale_value(nm),
+                        "box": (min(w["box"][0] for w in run), min(w["box"][1] for w in run),
+                                max(w["box"][2] for w in run), max(w["box"][3] for w in run)),
+                    })
+        found.sort(key=lambda c: (not c["standard"], c["words"]))
+        return found
+
+    def _bar_beside_label(self, binaries, label, max_thickness):
+        """
+        The scale bar that belongs to ``label``: the bar line nearest it.
+
+        Pieces on one row either side of the label are one bar (FEI prints the
+        label in a gap in the middle of it). A bar with end ticks is measured
+        between the ticks' centres, the convention both FEI and Zeiss draw to.
+
+        Returns:
+            tuple ``(polarity, binary, left, right, row, pixel_length, label_box)``
+            in crop pixels, or None when no bar sits beside the label.
+        """
+        # Solid bars first. Only if none sits beside the label are gaps bridged,
+        # for a dotted bar: bridging also turns noise and the foot of the label's
+        # own letters into short lines.
+        for bridge in (False, True):
+            found = self._nearest_bar(binaries, label, max_thickness, bridge)
+            if found is not None:
+                break
+        if found is None:
+            return None
+
+        polarity, binary, group = found
+        left, right = group["x0"], group["x1"]
+        row = int(round((group["y0"] + group["y1"]) / 2))
+        ticks = self._tick_centres(binary, left, right, group["y0"], group["y1"])
+        if ticks is not None:
+            left_centre, right_centre = ticks
+            pixel_length = right_centre - left_centre
+            left = int(round(left_centre))
+            right = left + int(round(pixel_length)) - 1
+        else:
+            pixel_length = right - left + 1
+        return polarity, binary, left, right, row, pixel_length, label["box"]
+
+    def _nearest_bar(self, binaries, label, max_thickness, bridge):
+        """The bar-like line nearest a label, as (polarity, binary, group), or None."""
+        lx0, ly0, lx1, ly1 = label["box"]
+        label_h = max(4.0, ly1 - ly0)
+        label_w = max(4.0, lx1 - lx0)
+        label_cx = (lx0 + lx1) / 2
+        label_cy = (ly0 + ly1) / 2
+        best = None
+        for polarity, binary in binaries.items():
+            height, width = binary.shape
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(8, int(label_h)), 1))
+            source = binary
+            if bridge:
+                source = cv2.morphologyEx(binary, cv2.MORPH_CLOSE,
+                                          cv2.getStructuringElement(cv2.MORPH_RECT, (5, 1)))
+            opened = cv2.morphologyEx(source, cv2.MORPH_OPEN, kernel)
+            count, _labels, stats, _ = cv2.connectedComponentsWithStats(opened, connectivity=8)
+            pieces = []
+            for k in range(1, count):
+                x, y, w, h, area = (int(v) for v in stats[k][:5])
+                if w <= 3 * h or h > max_thickness or area < self.MIN_BAR_FILL * w * h:
+                    continue
+                if x == 0 and x + w >= width:
+                    continue                      # a divider across the whole region
+                pieces.append({"x0": x, "x1": x + w - 1, "y0": y, "y1": y + h - 1})
+            pieces.sort(key=lambda s: s["x0"])
+            groups = []
+            for piece in pieces:
+                row = (piece["y0"] + piece["y1"]) / 2
+                for group in groups:
+                    if abs((group["y0"] + group["y1"]) / 2 - row) > 2:
+                        continue
+                    gap = piece["x0"] - group["x1"]
+                    split_by_label = (group["x1"] < label_cx < piece["x0"]
+                                      and abs(row - label_cy) <= label_h
+                                      and gap <= label_w + 4 * label_h)
+                    if 0 < gap and (gap <= 3 or split_by_label):
+                        group.update(x1=piece["x1"], y0=min(group["y0"], piece["y0"]),
+                                     y1=max(group["y1"], piece["y1"]))
+                        break
+                else:
+                    groups.append(dict(piece))
+            for group in groups:
+                length = group["x1"] - group["x0"] + 1
+                if length < 5:
+                    continue
+                # A line across the whole region is a divider, or a bar too long
+                # for this region: ranked last, so a wider region gets its turn.
+                spanning = group["x0"] == 0 and group["x1"] >= width - 1
+                # A line found only by bridging gaps must have had gaps: a dotted
+                # bar, not solid shapes run together.
+                if bridge:
+                    row_pixels = binary[group["y0"]:group["y1"] + 1, group["x0"]:group["x1"] + 1] > 0
+                    if row_pixels.any(axis=0).mean() > 0.9:
+                        continue
+                row = (group["y0"] + group["y1"]) / 2
+                # The foot of the label's own letters, or an underline: a thin
+                # line within the label's box. (OCR draws the box generously, so
+                # a thick bar just below the text can fall inside it too.)
+                thin = group["y1"] - group["y0"] + 1 <= max(3, 0.1 * label_h)
+                if (thin and ly0 <= row <= ly1
+                        and group["x0"] >= lx0 - 2 and group["x1"] <= lx1 + 2):
+                    continue
+                vertical = 0.0 if ly0 <= row <= ly1 else min(abs(row - ly0), abs(row - ly1))
+                horizontal = max(0.0, group["x0"] - lx1, lx0 - group["x1"])
+                if vertical > 3 * label_h or horizontal > 2 * label_w:
+                    continue
+                # A bar stands out from the rows just above and below it. A strip
+                # of a light databar's own background between two lines of text
+                # passes every other test, and does not.
+                if not self._stands_out(binary, group):
+                    continue
+                # Nearest first; at much the same distance, the solid bar beats
+                # an outline drawn round it, then the longer line wins.
+                thickness = group["y1"] - group["y0"] + 1
+                # A one-pixel line, or one on the region's top or bottom row, is
+                # nearly always a border or an anti-aliased edge: last resort only.
+                weak = thickness < 2 or group["y0"] == 0 or group["y1"] >= height - 1
+                score = (weak, round((vertical + 2 * horizontal) / max(2.0, label_h / 3)),
+                         spanning, -thickness, -length)
+                if best is None or score < best[0]:
+                    best = (score, polarity, binary, group)
+        if best is None:
+            return None
+        return best[1], best[2], best[3]
+
+    def _binaries_like_label(self, gray, binaries, box):
+        """
+        The thresholded images to look for the bar in: those of the label's own
+        colour. A bar is drawn like its label; lines of the other polarity were
+        winning, a dark FEI databar panel over its white bar, the white outline
+        round a JEOL TEM bar over the black bar inside it.
+        """
+        ink = self._ink_like_label(gray, box)
+        if ink is None:
+            return dict(binaries)
+        mask, brighter = ink
+        same = "bright" if brighter else "dark"
+        chosen = {f"{same}-ink": mask}
+        if same in binaries:
+            chosen[same] = binaries[same]
+        if "colour" in binaries:
+            x0, y0, x1, y1 = (int(round(v)) for v in box)
+            if binaries["colour"][max(0, y0):y1, max(0, x0):x1].any():
+                chosen["colour"] = binaries["colour"]
+        return chosen
+
+    @staticmethod
+    def _ink_like_label(gray, box, pad=None):
+        """
+        Everything drawn in the label's colour, as (binary image, brighter), or
+        None when the label hardly differs from its background.
+
+        The label's background is the median of a band around it; its ink is the
+        far tail of the pixels inside it on the side away from the background;
+        the threshold sits halfway between.
+        """
+        height, width = gray.shape
+        x0, y0, x1, y1 = (int(round(v)) for v in box)
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(width, max(x0 + 1, x1)), min(height, max(y0 + 1, y1))
+        inside = gray[y0:y1, x0:x1].astype(np.float64)
+        if inside.size < 9:
+            return None
+        pad = pad or max(3, (y1 - y0) // 2)
+        around = gray[max(0, y0 - pad):min(height, y1 + pad),
+                      max(0, x0 - pad):min(width, x1 + pad)].astype(np.float64)
+        background = float(np.median(around))
+        brighter = inside.mean() > background
+        ink = np.percentile(inside, 95 if brighter else 5)
+        if abs(ink - background) < 25:
+            return None
+        threshold = (ink + background) / 2
+        mask = gray > threshold if brighter else gray < threshold
+        return mask.astype(np.uint8) * 255, bool(brighter)
+
+    @staticmethod
+    def _stands_out(binary, group, reach=3, most=0.5):
+        """
+        Whether, on each side of a line, one of the next few rows is mostly
+        background. Any of them will do: a bar outlined in white over a dark
+        particle has background only in the outline's row.
+        """
+        height = binary.shape[0]
+        x0, x1 = group["x0"], group["x1"] + 1
+        for direction, edge in ((-1, group["y0"]), (1, group["y1"])):
+            rows = [edge + direction * k for k in range(1, reach + 1)]
+            rows = [r for r in rows if 0 <= r < height]
+            if rows and all((binary[r, x0:x1] > 0).mean() >= most for r in rows):
+                return False
+        return True
+
+    @staticmethod
+    def _tick_centres(binary, left, right, top, bottom, reach=8):
+        """
+        Centres of vertical end ticks at both ends of a bar, or None.
+
+        A tick is a column near the end that runs well above or below the bar's
+        own thickness. Measured from the outside of the ticks, a Zeiss 2 µm bar
+        came out 78 px against the 75.8 its metadata implies; centre to centre it
+        is 76.
+        """
+        height = binary.shape[0]
+        thickness = bottom - top + 1
+        need = thickness + max(4, thickness)
+
+        def extent(col):
+            column = binary[:, col] > 0
+            if not column[top:bottom + 1].any():
+                return 0
+            up = top
+            while up > 0 and column[up - 1]:
+                up -= 1
+            down = bottom
+            while down < height - 1 and column[down + 1]:
+                down += 1
+            return down - up + 1
+
+        def centre(cols):
+            hits = [c for c in cols if extent(c) >= need]
+            return float(np.mean(hits)) if hits else None
+
+        span = right - left + 1
+        if span < 3 * reach:
+            return None
+        left_centre = centre(range(left, left + reach))
+        right_centre = centre(range(right - reach + 1, right + 1))
+        if left_centre is None or right_centre is None:
+            return None
+        return left_centre, right_centre
 
     def _find_scale_line_morphological(self, binary255, max_thickness=None):
         """
@@ -1251,19 +1653,6 @@ class ScaleDetector:
 
         return (leftmost, rightmost, bar_row, spanned, int(best_area))
 
-    # Known SEM instrument parameter patterns that should NOT be treated as scale
-    # These are values like "8.8 mm" (working distance), "10.00 kV", etc.
-    _INSTRUMENT_PARAM_PATTERNS = [
-        r'WD\s*$',           # Working distance label right before the value
-        r'^\s*\d+\.\d+\s*kV',  # Accelerating voltage
-        r'^\s*\d+\s*pA',     # Beam current
-        r'^\s*\d+\s*nA',     # Beam current
-        r'^\s*\d+\s*ps',     # Dwell time
-        r'^\s*\d+\s*us',     # Dwell time
-        r'PM\b',             # AM/PM time marker
-        r'AM\b',             # AM/PM time marker
-    ]
-
     def _parse_scale_text(self, ocr_text):
         """
         Extract scale value and unit from OCR text.
@@ -1287,9 +1676,10 @@ class ScaleDetector:
         # never labelled in metres, and picometre bars do not occur on these
         # instruments — but "µm" is very often misread as "m" or "pm", which
         # previously yielded scales off by a factor of a million or more.
+        # The unit must end the word: "20 Aug" in a date is not 20 ångström.
         pattern = (r'(\d+(?:\.\d+)?)\s*'
                    r'(nm|uum|pum|jum|lum|ium|prn|hrn|urn|um|µm|μm|hm|mm|cm|'
-                   r'angstroms|angstrom|å|a)')
+                   r'angstroms|angstrom|å|a)(?![a-z])')
 
         # Find ALL matches, not just the first — then filter out instrument params
         candidates = []
@@ -1411,21 +1801,60 @@ class ScaleDetector:
             gray = image
 
         row_medians = np.median(gray, axis=1).astype(float)
-        base = row_medians[H - 1]
+        spreads = np.median(np.abs(gray - row_medians[:, None]), axis=1)
 
-        # Walk up from the last row while the background level holds. Scanning
-        # further than the largest acceptable bar is deliberate: it is what makes
-        # "no boundary found" distinguishable from "a very tall bar".
+        # Usually the strip runs to the bottom edge. Zeiss places it a few rows
+        # higher, with a sliver of micrograph below; there the search starts at
+        # the strip's lowest row, and the crop takes the sliver with it.
+        starts = [0]
+        inset_limit = int(H * self.DATABAR_INSET_FRACTION)
+        for offset in range(1, inset_limit):
+            # A flat row whose neighbour below is textured micrograph, or flat
+            # at a clearly different level (black, at a low-magnification edge).
+            below_differs = (spreads[H - offset] > 2
+                             or abs(row_medians[H - 1 - offset] - row_medians[H - offset])
+                             >= self.DATABAR_MIN_SEPARATION)
+            if spreads[H - 1 - offset] <= 2 and below_differs:
+                starts.append(offset)
+                break
+        for offset in starts:
+            height = self._strip_height(gray, row_medians, offset)
+            if height:
+                result['has_databar'] = True
+                result['databar_height'] = height
+                result['databar_fraction'] = height / H
+                return result
+        return result
+
+    # How far above the bottom edge a databar strip may begin (Zeiss: 3-18 rows
+    # of a 768-row frame).
+    DATABAR_INSET_FRACTION = 0.04
+
+    def _strip_height(self, gray, row_medians, offset):
+        """
+        Rows from the top of a databar strip whose lowest row is ``offset`` rows
+        above the bottom edge, down to the bottom edge; 0 if there is no strip.
+        """
+        H = gray.shape[0]
+        bottom = H - 1 - offset
+        # The strip's own level, from its lowest rows rather than one row: Zeiss
+        # frames the strip with a black rule, and starting from the rule's level
+        # the strip was never found at all.
+        base = float(np.median(row_medians[max(0, bottom - 11):bottom + 1]))
+
+        # Walk up while the background level holds. Scanning further than the
+        # largest acceptable bar is deliberate: it is what makes "no boundary
+        # found" distinguishable from "a very tall bar".
         #
         # A single disagreeing row does not end the bar — it is usually a rule
         # drawn across it. Only a run of them means the micrograph has started.
         # `height` is where the walk has reached; `confirmed` is the last row
         # that actually matched, so trailing rule rows are not counted in.
-        scan_limit = min(H, int(H * self.DATABAR_SCAN_FRACTION))
+        scan_limit = min(H - offset, int(H * self.DATABAR_SCAN_FRACTION))
         height = confirmed = 0
         misses = 0
         while height < scan_limit:
-            if abs(row_medians[H - 1 - height] - base) <= self.DATABAR_MEDIAN_TOLERANCE:
+            if abs(row_medians[bottom - height] - base) <= self.DATABAR_MEDIAN_TOLERANCE:
                 misses = 0
                 height += 1
                 confirmed = height
@@ -1435,6 +1864,29 @@ class ScaleDetector:
                     break
                 height += 1
         height = confirmed
+        # Take in a frame rule along the strip's top edge: a thin run of uniform
+        # rows unlike the strip, which would otherwise be left on the
+        # micrograph. A long run is not a rule but uniform micrograph (black, at
+        # a low-magnification edge), and stays.
+        def flat(row):
+            values = gray[row].astype(float)
+            return np.median(np.abs(values - np.median(values))) <= 2
+
+        run, level = 0, None
+        while run < self.DATABAR_MAX_RULE_THICKNESS_PX:
+            row = bottom - height - run
+            if row < 0 or not flat(row) or abs(row_medians[row] - base) <= self.DATABAR_MEDIAN_TOLERANCE:
+                break
+            if level is not None and abs(row_medians[row] - level) > self.DATABAR_MEDIAN_TOLERANCE:
+                break
+            level = row_medians[row] if level is None else level
+            run += 1
+        above_run = bottom - height - run
+        if run and (above_run < 0 or not flat(above_run)
+                    or abs(row_medians[above_run] - level) > self.DATABAR_MEDIAN_TOLERANCE):
+            height += run
+        height += offset
+        top = H - height
 
         # Too short to be a databar, or no top edge inside the scan window. The
         # latter means the whole bottom quarter of the frame looks like its last
@@ -1444,35 +1896,45 @@ class ScaleDetector:
         # rather than the actual edge: it overestimated the height on real
         # databars, and claimed one on images that had none. Both cost real
         # micrograph area, since the Scale tab trims whatever is reported.
-        if not (self.DATABAR_MIN_HEIGHT_PX <= height <= int(H * self.DATABAR_MAX_FRACTION)):
-            return result
+        if not (self.DATABAR_MIN_HEIGHT_PX <= height - offset
+                and height <= int(H * self.DATABAR_MAX_FRACTION)):
+            return 0
 
-        above = gray[:H - height]
+        above = gray[:top]
         if above.size == 0:
-            return result
+            return 0
 
         # A databar is visibly a different block from the image above it.
-        separation = abs(float(np.median(gray[H - height:])) - float(np.median(above)))
+        separation = abs(float(np.median(gray[top:bottom + 1])) - float(np.median(above)))
         if separation < self.DATABAR_MIN_SEPARATION:
-            return result
+            return 0
 
         # ...and it begins with a drawn edge. Checking the top two rows rather
-        # than only the first tolerates a divider rule along the very top.
-        edge_rows = gray[H - height:H - height + 2].astype(float)
-        if edge_rows.std(axis=1).min() > self.DATABAR_EDGE_ROW_STD:
-            return result
+        # than only the first tolerates a divider rule along the very top. The
+        # spread is the median deviation, not the standard deviation: JEOL puts
+        # the scale bar in the strip's top rows, and a bar across a seventh of
+        # the width made those rows' standard deviation look like a grid bar's.
+        edge_rows = gray[top:top + 2].astype(float)
+        spread = np.median(np.abs(edge_rows - np.median(edge_rows, axis=1, keepdims=True)), axis=1)
+        if spread.min() > self.DATABAR_EDGE_ROW_STD:
+            return 0
 
-        # A drawn edge is a step, not a slope: compare the rows just above it
-        # with the rows just below.
-        above_edge = np.median(row_medians[max(0, H - height - 3):H - height])
-        below_edge = np.median(row_medians[H - height:H - height + 3])
-        if abs(above_edge - below_edge) < self.DATABAR_MIN_EDGE_STEP:
-            return result
+        # A drawn edge is straight and runs the full width: just inside it the
+        # strip's level holds nearly everywhere, and just outside it nearly
+        # nowhere. A grid bar's edge is diagonal, so neither row is consistent.
+        inside = gray[min(bottom, top + 2)].astype(float)
+        outside = gray[top - 1].astype(float)
+        if ((np.abs(inside - base) <= 3 * self.DATABAR_MEDIAN_TOLERANCE).mean() < 0.8
+                or (np.abs(outside - base) > self.DATABAR_MEDIAN_TOLERANCE).mean() < 0.5):
+            return 0
 
-        result['has_databar'] = True
-        result['databar_height'] = height
-        result['databar_fraction'] = height / H
-        return result
+        # A drawn edge is a step, not a slope: the rows just above it against
+        # the strip's own level (not the rows just below, which may be a frame
+        # rule taken in above).
+        above_edge = np.median(row_medians[max(0, top - 3):top])
+        if abs(above_edge - base) < self.DATABAR_MIN_EDGE_STEP:
+            return 0
+        return height
 
     # Where scale bars are found, as (region_x, region_y, region_width,
     # region_height). SEM instruments put the bar in a databar at bottom-right;

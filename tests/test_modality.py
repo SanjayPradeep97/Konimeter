@@ -7,7 +7,6 @@ and the wrong databar assumption either leaves one in frame or crops micrograph
 away.
 """
 
-import numpy as np
 import pytest
 
 from sem_particle_analysis import modality as mod
@@ -69,38 +68,42 @@ class TestFromMetadata:
         assert mod.from_metadata(None).kind == mod.UNKNOWN
 
 
-class TestFromAppearance:
-    def test_a_square_frame_reads_as_tem(self):
-        image = np.zeros((1024, 1024), dtype=np.uint8)
-        found = mod.from_appearance(image)
-        assert found.kind == mod.TEM
-        assert found.from_metadata is False
+class TestFilesThatNameTheirInstrument:
+    def test_jeol_tem_center_tags_mean_tem(self):
+        # JEOL's TEM software writes numeric private tags and no text; on the
+        # test set they are on every JEOL TEM TIFF and on no SEM file.
+        found = mod.from_metadata(tags({65006: "-0.0", 65007: "-0.0", 65009: "1.0",
+                                        65010: "1.0", 65027: b"\x00"}))
+        assert found.kind == mod.TEM and found.instrument == "jeol"
 
-    def test_a_rectangular_frame_stays_unknown(self):
-        # Including one with a databar: some TEMs write one too, and shading at
-        # the bottom of a TEM frame was once taken for one, making it "SEM".
-        image = np.zeros((1094, 1536), dtype=np.uint8)
-        assert mod.from_appearance(image).kind == mod.UNKNOWN
+    def test_an_amt_camera_means_tem(self):
+        metadata = {"raw_tags": {}, "software": None,
+                    "image_description": "NIOSH\r40000\rXpixCal=620.66\rUnit=um"}
+        found = mod.from_metadata(metadata)
+        assert found.kind == mod.TEM and found.instrument == "amt"
+
+    def test_a_jeol_sem_says_so_in_its_txt(self):
+        text = "$CM_INSTRUMENT JSM 6500F\n$$SM_COLUMN_MODE SEM\n"
+        assert mod.from_sidecar(text).kind == mod.SEM
+
+    def test_a_jsm_without_a_column_mode_is_still_an_sem(self):
+        assert mod.from_sidecar("$CM_INSTRUMENT JSM 7600F\n").kind == mod.SEM
 
 
 class TestDetect:
-    def test_metadata_beats_appearance(self):
-        # A square frame looks like TEM, but the file says SEM.
-        image = np.zeros((1024, 1024), dtype=np.uint8)
-        found = mod.detect(image, metadata=tags({34682: {"System": {"Type": "SEM"}}}))
+    def test_the_file_is_read(self):
+        found = mod.detect(metadata=tags({34682: {"System": {"Type": "SEM"}}}))
         assert found.kind == mod.SEM
         assert found.from_metadata is True
 
-    def test_appearance_fills_in_when_metadata_is_silent(self):
-        image = np.zeros((2048, 2048), dtype=np.uint8)
-        found = mod.detect(image, metadata=tags())
-        assert found.kind == mod.TEM
-        assert found.from_metadata is False
-        assert "inferred" in found.detail
+    def test_the_txt_beside_the_image_is_read(self):
+        found = mod.detect(metadata=tags(), sidecar="$CM_INSTRUMENT JSM 6500F\n")
+        assert found.kind == mod.SEM
 
-    def test_unknown_carries_its_reasons(self):
-        image = np.zeros((768, 1024), dtype=np.uint8)
-        found = mod.detect(image, metadata=tags())
+    def test_a_silent_file_is_unknown_not_guessed(self):
+        # Frames that say nothing are left to the microscope chosen on Setup;
+        # guessing from a square frame or a printed bar called old SEM JPEGs TEM.
+        found = mod.detect(metadata=tags())
         assert found.kind == mod.UNKNOWN
         assert found.detail
 

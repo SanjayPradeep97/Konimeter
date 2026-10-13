@@ -73,6 +73,36 @@ def bar_frame():
     return image, truth, cal
 
 
+class TestWhatIsLeftOutOfAnalysis:
+    """
+    A bar printed on the picture is left out of measurement. Leaving out the
+    whole region that was searched, a fifth of the frame's width, discarded
+    specimen; the reader now records exactly where the bar and its label are.
+    """
+
+    def test_the_reader_marks_the_bar_and_label(self):
+        cal = sc.ScaleCalibration(nm_per_px=2.0, method="box_ocr", scale_nm=500,
+                                  pixel_length=250,
+                                  extra={"region": [0, 900, 300, 100],
+                                         "mark": [20, 940, 260, 40]})
+        assert sc.printed_area(cal, (1024, 1024)) == (20, 940, 260, 40)
+
+    def test_clicked_points_get_a_band_round_them(self):
+        cal = sc.from_two_points((100, 950), (300, 950), 1, "µm")
+        x, y, w, h = sc.printed_area(cal, (1000, 1000))
+        assert x < 100 and x + w > 300
+        assert y < 950 < y + h
+
+    def test_without_a_mark_the_searched_region_is_used(self):
+        cal = sc.ScaleCalibration(nm_per_px=2.0, method="box_ocr", scale_nm=500,
+                                  pixel_length=250, extra={"region": [0, 900, 300, 100]})
+        assert sc.printed_area(cal, (1024, 1024)) == (0, 900, 300, 100)
+
+    def test_metadata_prints_nothing(self):
+        cal = sc.ScaleCalibration(nm_per_px=2.0, method="metadata")
+        assert sc.printed_area(cal, (1024, 1024)) is None
+
+
 class TestTheCheckImage:
     def test_it_shows_the_span_where_the_bar_actually_is(self, bar_frame):
         from sem_analysis_app.visualization import render_scale_check, _SPAN_COLOR
@@ -134,16 +164,20 @@ def app_state():
     from sem_analysis_app.state import state
 
     kept = (state.scale_calibration, state.scale_baseline, state.scale_info,
-            state.current_image, state.image_paths, state.current_index)
+            state.current_image, state.image_paths, state.current_index,
+            state.scale_baselines, state.label_corrections)
     state.scale_calibration = None
     state.scale_baseline = None
     state.scale_info = None
     state.current_image = None
     state.image_paths = []
     state.current_index = 0
+    state.scale_baselines = []
+    state.label_corrections = {}
     yield state
     (state.scale_calibration, state.scale_baseline, state.scale_info,
-     state.current_image, state.image_paths, state.current_index) = kept
+     state.current_image, state.image_paths, state.current_index,
+     state.scale_baselines, state.label_corrections) = kept
 
 
 class TestWhenToInterrupt:
@@ -230,7 +264,7 @@ class TestWhatTheInterfaceIsTold:
         from sem_analysis_app.callbacks import scale_tab
 
         app_state.scale_calibration = box_ocr_calibration(warning="check this")
-        span, preview, row, message, check_img, tab = scale_tab.check_outputs()
+        span, preview, row, message, check_img, *fields, tab = scale_tab.check_outputs()
         assert isinstance(tab, gr.Tabs)
         # Nothing to click through on the working tab: this one needs the canvas.
         assert row.get("visible") is False
@@ -240,7 +274,7 @@ class TestWhatTheInterfaceIsTold:
         from sem_analysis_app.callbacks import scale_tab
 
         app_state.scale_calibration = box_ocr_calibration()
-        span, preview, row, message, check_img, tab = scale_tab.check_outputs()
+        span, preview, row, message, check_img, *fields, tab = scale_tab.check_outputs()
         assert not isinstance(tab, gr.Tabs), "should not move the analyst"
         assert row.get("visible") is True
         assert "7.812" in message
@@ -251,9 +285,24 @@ class TestWhatTheInterfaceIsTold:
 
         app_state.scale_calibration = sc.ScaleCalibration(nm_per_px=2.5,
                                                           method="metadata")
-        span, preview, row, message, check_img, tab = scale_tab.check_outputs()
+        span, preview, row, message, check_img, *fields, tab = scale_tab.check_outputs()
         assert not isinstance(tab, gr.Tabs)
         assert row.get("visible") is False
+
+    def test_a_bar_reading_offers_its_value_to_correct(self, app_state):
+        from sem_analysis_app.callbacks import scale_tab
+
+        app_state.scale_calibration = box_ocr_calibration()
+        *_, value, unit, work_value, work_unit, _tab = scale_tab.check_outputs()
+        assert (value["value"], unit["value"]) == (1.0, "µm")
+        assert value["visible"] and work_value["visible"]
+
+    def test_metadata_has_no_value_to_correct(self, app_state):
+        from sem_analysis_app.callbacks import scale_tab
+
+        app_state.scale_calibration = sc.ScaleCalibration(nm_per_px=2.5, method="metadata")
+        *_, value, _unit, _wv, _wu, _tab = scale_tab.check_outputs()
+        assert value["visible"] is False
 
     def test_the_span_channel_carries_the_measurement(self, app_state, bar_frame):
         import json
@@ -420,3 +469,62 @@ class TestAScaleSetAfterTheCandidateIsTheOneMeasured:
         row = self.saved(csv_path)
         assert row["scale_method"] == "none"
         assert np.isnan(row["nm_per_px"])
+
+
+class TestCorrectingTheBarsValue:
+    """
+    OCR reads the bar's number wrong far more often than it mismeasures the bar:
+    on the test set, "10 µm" came back as "40 Urn" on four frames. Correcting the
+    number keeps the measured bar and replaces only the value.
+    """
+
+    def test_a_corrected_value_rescales_with_the_same_bar(self, app_state):
+        from sem_analysis_app.callbacks import scale_tab
+
+        app_state.scale_calibration = box_ocr_calibration(scale_nm=40000.0,
+                                                          nm_per_px=40000.0 / 128)
+        scale_tab.confirm_scale(10, "µm")
+        cal = app_state.scale_calibration
+        assert cal.nm_per_px == pytest.approx(10000.0 / 128)
+        assert cal.pixel_length == 128 and cal.trustworthy
+        assert "corrected" in cal.detail
+
+    def test_the_same_misreading_is_corrected_next_time(self, app_state):
+        from sem_analysis_app.callbacks import scale_tab
+
+        app_state.scale_calibration = box_ocr_calibration(scale_nm=40000.0,
+                                                          nm_per_px=40000.0 / 128)
+        scale_tab.confirm_scale(10, "µm")
+        assert app_state.known_correction(40000.0, 128) == pytest.approx(10000.0)
+        assert app_state.known_correction(40000.0, 200) is None
+
+    def test_setting_it_back_forgets_the_correction(self, app_state):
+        # Corrected to 20 µm and back to the 40 µm that was read: nothing to
+        # remember, or the next 40 µm bar would be "corrected" to 20.
+        from sem_analysis_app.callbacks import scale_tab
+
+        app_state.scale_calibration = box_ocr_calibration(scale_nm=40000.0,
+                                                          nm_per_px=40000.0 / 128)
+        scale_tab.confirm_scale(20, "µm")
+        scale_tab.confirm_scale(40, "µm")
+        assert app_state.known_correction(40000.0, 128) is None
+        assert app_state.scale_calibration.nm_per_px == pytest.approx(40000.0 / 128)
+
+    def test_an_unchanged_value_just_confirms(self, app_state):
+        from sem_analysis_app.callbacks import scale_tab
+
+        app_state.scale_calibration = box_ocr_calibration()
+        scale_tab.confirm_scale(1, "µm")
+        assert app_state.scale_calibration.confirmed
+        assert app_state.label_corrections == {}
+
+    def test_every_accepted_magnification_is_remembered(self, app_state):
+        from sem_analysis_app.callbacks import scale_tab
+
+        for nm in (1000.0, 2000.0):
+            app_state.scale_calibration = box_ocr_calibration(scale_nm=nm, nm_per_px=nm / 128)
+            scale_tab.confirm_scale()
+        # A reading at the first magnification again goes straight through.
+        app_state.scale_calibration = box_ocr_calibration(scale_nm=1000.0,
+                                                          nm_per_px=1000.0 / 128)
+        assert scale_tab.review()[0] is None

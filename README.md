@@ -100,7 +100,7 @@ OpenMP runtime and otherwise refuse to share a process.
 
 | Tab | What happens there |
 | --- | --- |
-| ⚙️ Setup | Load the SAM model (the first time, download it with the button there), then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it |
+| ⚙️ Setup | Load the SAM model (the first time, download it with the button there), say whether the images are from an SEM or a TEM, then paste the path of a folder of images. Results go to `analysis_results.csv` in that folder, and opening the folder again carries on with it |
 | 🖼️ Gallery | Pick an image. Ticked images already have saved results |
 | 📏 Scale & Frame | Establish the scale, and check what the app decided about the image (see below) |
 | 🔬 Segment & Refine | Segment with SAM, choose among its candidate masks, then correct them: Remove, Add, Merge, or Redraw a particle with include/exclude clicks. Every click and every applied change can be undone. *Particles are* (darker / brighter than the background) sets which candidates come first |
@@ -117,36 +117,40 @@ tab. Three methods, tried in order of trustworthiness:
 
 | | Method | When |
 | --- | --- | --- |
-| 1 | Pixel size read from the file's own metadata | Automatic on load. Exact — nothing to check. The one exception: a pixel size found only in a TIFF's generic resolution tag, usually a print setting, waits for you to confirm it |
+| 1 | Pixel size read from the file's own metadata | Automatic on load. Exact — nothing to check. Read from FEI/Thermo, Zeiss, Hitachi and TESCAN TIFFs, AMT TEM cameras, and the `.txt` a JEOL SEM saves beside each image. A TIFF's resolution tag is ignored: programs fill it with a print setting |
 | 2 | Read the printed scale bar inside a box | Runs automatically when there is no metadata. Drag to draw the box, a corner to resize it, the middle to move it |
-| 3 | Click the outer edge of each end of the bar and type its length | When the bar cannot be read. A 7x magnifier follows the cursor so you land exactly on the edge |
+| 3 | Click each end of the bar and type its length: the outer edge of a solid bar, the middle of each end tick of a \|—\| bar | When the bar cannot be read. A 7x magnifier follows the cursor so you land exactly |
 
 A reading from the printed bar is marked unconfirmed until you press **Confirm
 scale**, and the measured span is drawn on the bar so you can see what was read.
+The value read off the label is shown beside the button: if OCR misread it, type
+the right one before confirming, and the measured bar is kept. The same misreading
+of a bar the same length is corrected the same way from then on, and every scale
+you confirm lets later images at that magnification through without asking.
 Metadata and hand measurement are trusted outright, since neither involves a
 machine reading a glyph. The result is shown as "X nm/px · how it was obtained",
 and is what segmentation and the results file use; how the scale was obtained is
 recorded beside every row in the `scale_method` column.
 
-### Darker or brighter particles
+### SEM or TEM
 
-SAM proposes outlines for both what stands out dark and what stands out bright,
-and the app has to put the right one first. With small particles that is easy;
-with a large one, the particle and the background around it are equally
-plausible, and only knowing which way round the image is settles it.
+On the Setup tab, say which **Microscope** the folder came from. It tells the app
+which way round the particles are: brighter than the background in SEM, darker in
+TEM bright field. That matters most for a large particle, where the particle and
+the background around it are equally plausible outlines and only knowing which
+way round the image is settles it.
 
-That is what **Particles are** on the Segment & Refine tab says: *darker* than
-the background (TEM bright field, the usual case), *brighter* (most SEM images), or
-*Auto*. Auto goes by the file: FEI and JEOL files name the instrument, Zeiss,
-Hitachi and TESCAN files are SEM, and a square frame with no metadata is taken to
-be from a TEM camera. Otherwise Auto puts first whichever side stands out more.
-The choice only orders the candidates — the other side is still offered after
-them — and it is kept for every image until you change it, so set it once per
-folder. The Scale & Frame tab shows what the file said and what is expected.
+It is filled in for you when the files say: FEI, Zeiss, Hitachi and TESCAN TIFFs,
+JEOL TEM files (by the tags JEOL's software writes), the `.txt` a JEOL SEM saves
+beside each image, and AMT TEM cameras. If you pick one and the files say the
+other, the app tells you. **Particles are** on the Segment & Refine tab overrides
+it for an unusual image, a dark-field TEM frame say; either way the other side's
+outlines are still offered, just after.
 
 An information strip (databar) below the image, as most SEMs write, is found and
-cut off. A scale bar burned into the image itself, as on most TEMs, is left out
-of measurement instead.
+cut off, including Zeiss's, which sits a few rows above the bottom edge. A scale
+bar burned into the image itself, as on most TEMs, is left out of measurement
+instead: just the bar and the line of text it sits on.
 
 Micrographs often contain large areas that are not specimen — the black corners
 left by a circular aperture, a grid bar blocking the beam, a burned-in scale bar.
@@ -168,7 +172,7 @@ gone and scale has to come from the printed bar or from a hand measurement.
 | `file_name` | the image |
 | `num_particles` | particle count |
 | `nm_per_px` | the scale used |
-| `scale_method` | how that scale was obtained: `metadata`, `tiff_resolution`, `box_ocr`, `two_points` or `none`; `+unconfirmed` if nobody confirmed it |
+| `scale_method` | how that scale was obtained: `metadata`, `box_ocr`, `two_points` or `none`; `+unconfirmed` if nobody confirmed it |
 | `particle_areas_px`, `particle_areas_nm2` | each particle's area |
 | `equiv_diameters_px`, `equiv_diameters_nm` | each particle's equivalent circular diameter |
 

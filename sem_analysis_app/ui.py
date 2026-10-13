@@ -21,6 +21,7 @@ from .callbacks import (
     restore_session,
     restore_scale_tab,
     restore_setup,
+    set_microscope,
     current_save_dataset,
     set_save_dataset,
     download_model,
@@ -42,6 +43,7 @@ from .callbacks import (
     set_canvas_mode,
     set_crop_override,
     set_particle_polarity,
+    rerank,
     # segmentation + refinement
     segment_with_sam,
     select_mask_and_analyze,
@@ -204,6 +206,12 @@ def create_interface():
                                  "Shift + right-click it → Copy as path; in "
                                  "Finder, select it and press ⌥⌘C.",
                         )
+                        microscope_choice = gr.Radio(
+                            choices=["SEM", "TEM"], value=None, label="Microscope",
+                            info="SEM: particles usually brighter than the "
+                                 "background. TEM: darker. Filled in from the "
+                                 "files when they say.",
+                        )
                         load_btn = gr.Button("📁 Load images", variant="primary",
                                              size="lg", interactive=False)
                         load_status = gr.Textbox(label="Status", interactive=False)
@@ -253,6 +261,13 @@ def create_interface():
                             label="Scale in force", interactive=False, lines=3
                         )
                 with gr.Row():
+                    # The value read off the bar, to correct before confirming:
+                    # OCR misreads the number far more often than it mismeasures
+                    # the bar.
+                    printed_value = gr.Number(label="Bar's printed value", visible=False,
+                                              scale=1, min_width=120)
+                    printed_unit = gr.Dropdown(choices=UNITS, label="Unit", visible=False,
+                                               scale=1, min_width=90)
                     confirm_scale_btn = gr.Button("✔️ Confirm scale", variant="primary")
                     clear_scale_btn = gr.Button("✖️ Clear", variant="secondary")
 
@@ -328,9 +343,10 @@ def create_interface():
 
                         with gr.Group(visible=False) as tier3_controls:
                             gr.Markdown(
-                                "**Tier 3.** Click the outer edge of each end of the "
-                                "bar. A magnifier follows the cursor so you can land "
-                                "exactly on the edge, then type the printed length."
+                                "**Tier 3.** Click each end of the bar: the outer edge "
+                                "of a solid bar, or the middle of each end tick of a "
+                                "|—| bar. A magnifier follows the cursor so you can land "
+                                "exactly, then type the printed length."
                             )
                             point_readout = gr.Textbox(label="Points", interactive=False)
                             with gr.Row():
@@ -367,6 +383,11 @@ def create_interface():
                 with gr.Row(visible=False) as scale_check_row:
                     with gr.Column(scale=2):
                         scale_check_msg = gr.Markdown("")
+                        with gr.Row():
+                            check_value = gr.Number(label="Bar's printed value",
+                                                    visible=False, min_width=110)
+                            check_unit = gr.Dropdown(choices=UNITS, label="Unit",
+                                                     visible=False, min_width=80)
                         scale_check_btn = gr.Button("✔️ Scale is right — carry on",
                                                     variant="primary", size="sm")
                     with gr.Column(scale=3):
@@ -390,8 +411,8 @@ def create_interface():
                             choices=[("Auto", "auto"), ("Darker", "dark"),
                                      ("Brighter", "bright")],
                             value="auto", label="Particles are",
-                            info="…than the background. Usually darker in TEM, "
-                                 "brighter in SEM. Auto reads the file",
+                            info="…than the background. Auto follows the "
+                                 "microscope chosen on Setup",
                         )
                         segment_btn = gr.Button("🤖 Segment", variant="primary")
                         mask_choice = gr.Radio(
@@ -545,7 +566,8 @@ def create_interface():
         # the zoomed check, the prompt on the working tab and the tab the analyst
         # is left on cannot disagree about the same reading.
         CHECK_OUTPUTS = [scale_span_in, scale_preview, scale_check_row,
-                         scale_check_msg, scale_check_img, tabs]
+                         scale_check_msg, scale_check_img, printed_value, printed_unit,
+                         check_value, check_unit, tabs]
 
         # Nothing here re-draws the scale canvas on a tab change. Gradio unmounts
         # an inactive tab's panel and builds a fresh canvas when it is shown
@@ -561,8 +583,8 @@ def create_interface():
         download_btn.click(download_model,
                            outputs=[init_status, sam_file, download_btn, load_btn,
                                     init_sam_btn])
-        load_btn.click(load_images_from_folder, inputs=[folder_input],
-                       outputs=[load_status, gallery, tabs])
+        load_btn.click(load_images_from_folder, inputs=[folder_input, microscope_choice],
+                       outputs=[load_status, gallery, tabs, microscope_choice])
         save_dataset_box.change(set_save_dataset, inputs=[save_dataset_box],
                                 outputs=[save_dataset_box])
 
@@ -572,7 +594,8 @@ def create_interface():
         app.load(restore_session, outputs=[gallery, load_status])
         app.load(current_save_dataset, outputs=[save_dataset_box])
         app.load(restore_setup,
-                 outputs=[sam_file, download_btn, init_sam_btn, init_status, load_btn])
+                 outputs=[sam_file, download_btn, init_sam_btn, init_status, load_btn,
+                          microscope_choice])
         app.load(current_frame_controls,
                  outputs=[particle_choice, crop_manual, crop_override,
                           min_particle_size_slider])
@@ -624,7 +647,7 @@ def create_interface():
 
         reset_canvas_btn.click(None, js="() => { window.SCALE && window.SCALE.reset(); }")
 
-        confirm_scale_btn.click(confirm_scale,
+        confirm_scale_btn.click(confirm_scale, inputs=[printed_value, printed_unit],
                                 outputs=[tier_status, scale_summary]).then(
             frame_header, outputs=[header]).then(
             check_outputs, outputs=CHECK_OUTPUTS)
@@ -636,7 +659,7 @@ def create_interface():
         # Accepting from the working tab, so checking a reading costs a glance
         # and a click rather than a trip to another tab and back.
         scale_check_btn.click(
-            accept_from_work_tab,
+            accept_from_work_tab, inputs=[check_value, check_unit],
             outputs=CHECK_OUTPUTS + [header, scale_summary])
 
         def _toggle_crop(manual):
@@ -656,8 +679,15 @@ def create_interface():
         min_particle_size_slider.change(set_min_particle_size,
                                         inputs=[min_particle_size_slider],
                                         outputs=[segment_status])
-        # Re-sorts SAM's existing outlines; nothing is re-run. .input, not
-        # .change: restoring the choice on a page load must not re-sort.
+        # The microscope sets which way round particles are expected: re-sort
+        # the candidates on screen to match. .input, not .change, here and below:
+        # restoring a choice on a page load must not re-sort.
+        microscope_choice.input(set_microscope, inputs=[microscope_choice],
+                                outputs=[microscope_choice]).then(
+            rerank, outputs=[mask_viz, segment_status, mask_choice]).then(
+            frame_summary, outputs=[frame_status]).then(frame_header, outputs=[header])
+
+        # Re-sorts SAM's existing outlines; nothing is re-run.
         particle_choice.input(set_particle_polarity, inputs=[particle_choice],
                               outputs=[mask_viz, segment_status, mask_choice]
                               ).then(frame_summary, outputs=[frame_status]).then(

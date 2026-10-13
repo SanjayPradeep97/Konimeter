@@ -38,10 +38,10 @@ def iou(a, b):
 @pytest.fixture(scope="module")
 def scores(sam_checkpoint):
     """For each image: IoU of the first and best of three suggestions, and how
-    many were offered, with polarity left on auto and with it set to darker."""
+    many were offered, with no microscope chosen and with TEM chosen."""
     from PIL import Image
     from sem_particle_analysis import ParticleSegmenter, ScaleDetector, SAMModel
-    from sem_particle_analysis import modality, region
+    from sem_particle_analysis import region
     from sem_particle_analysis.utils import load_image
 
     segmenter = ParticleSegmenter(SAMModel(str(sam_checkpoint), model_type="vit_b"))
@@ -59,12 +59,13 @@ def scores(sam_checkpoint):
             results["cropped"] += 1
             image = image[: image.shape[0] - databar["databar_height"]]
             truth = truth[: image.shape[0]]
-        kind = modality.detect(image)
         analysable, _ = region.analysable_region(image)
         exclude = ~analysable if analysable is not None else None
 
         masks, _ = segmenter.segment_image(image)
-        for label, dark in (("auto", kind.dark_particles), ("dark", True)):
+        # The demo PNGs carry no metadata, so with nothing chosen on Setup the
+        # side that stands out more comes first; choosing TEM expects darker.
+        for label, dark in (("auto", None), ("dark", True)):
             ranked = segmenter.rank_candidates(image, masks, top_k=3,
                                                dark_features=dark, exclude=exclude)
             overlaps = [iou(c["mask"], truth) for c in ranked]
@@ -89,16 +90,16 @@ def test_no_demo_frame_loses_a_strip_to_a_false_databar(scores):
     assert scores["cropped"] == 0
 
 
-def test_particles_set_to_darker(scores):
+def test_microscope_set_to_tem(scores):
     rows = scores["dark"]
     assert right_first(rows) >= 45, right_first(rows)
     assert right_among_three(rows) >= 51, right_among_three(rows)
     assert offered_nothing(rows) <= 2
 
 
-def test_particles_left_on_auto(scores):
-    # Most demo frames say nothing about their instrument, so auto falls back
-    # to whichever side stands out more.
+def test_microscope_not_set(scores):
+    # The demo frames say nothing about their instrument, so without a choice
+    # on Setup the side that stands out more comes first.
     rows = scores["auto"]
     assert right_first(rows) >= 37, right_first(rows)
     assert right_among_three(rows) >= 49, right_among_three(rows)

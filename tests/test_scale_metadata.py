@@ -84,17 +84,13 @@ class TestGenericPatterns:
 
 
 class TestResolutionTags:
-    def test_reads_a_centimetre_resolution(self, detector, tmp_path):
-        # 1e6 px/cm -> 1e-6 cm/px -> 10 nm/px
-        path = write_tiff(tmp_path / "res.tif", resolution=(1e6, 1e6), resolution_unit=3)
-        result = detector.detect_scale_from_metadata(str(path))
-        assert result["conversion"] == pytest.approx(10.0, rel=1e-3)
-
-    @pytest.mark.parametrize("dpi", [72, 96, 300])
-    def test_ignores_standard_display_dpi(self, detector, tmp_path, dpi):
-        # 96 dpi is the scanner/display default, not an SEM calibration. Trusting
-        # it would report ~265,000 nm/px and rescale every measurement.
-        path = write_tiff(tmp_path / f"dpi{dpi}.tif", resolution=(dpi, dpi), resolution_unit=2)
+    @pytest.mark.parametrize("resolution, unit", [((72, 72), 2), ((96, 96), 2),
+                                                  ((300, 300), 2), ((1e6, 1e6), 3)])
+    def test_the_resolution_tags_are_never_a_scale(self, detector, tmp_path,
+                                                   resolution, unit):
+        # Even a plausible-looking value: there is no telling a calibration from
+        # a print setting, and in practice it is always the print setting.
+        path = write_tiff(tmp_path / "res.tif", resolution=resolution, resolution_unit=unit)
         with pytest.raises(ValueError):
             detector.detect_scale_from_metadata(str(path))
 
@@ -184,13 +180,84 @@ class TestUnitsAreReadAsWritten:
             "AP_PIXEL_SIZE = 2.791e-09\n", {}) == pytest.approx(2.791)
 
 
-class TestAPrintResolutionIsNotTrusted:
-    def test_an_unusual_dpi_is_offered_but_left_unconfirmed(self, detector, tmp_path):
-        # Most programs write a print resolution here. 400 dpi would otherwise
-        # become a trusted 63,500 nm/px.
+class TestAPrintResolutionIsIgnored:
+    def test_the_tiff_resolution_tag_is_not_a_scale(self, detector, tmp_path):
+        # Programs write a print resolution here. On the 17 test-set files that
+        # had nothing else it was wrong every time, by up to 130,000 times.
         path = write_tiff(tmp_path / "dpi400.tif", resolution=(400, 400), resolution_unit=2)
+        with pytest.raises(sc.ScaleError):
+            sc.from_metadata(detector, path)
+
+
+class TestZeissStoredResolution:
+    def tag(self, pixel, image_pixel, store):
+        return {34118: {"ap_pixel_size": ("Pixel Size", pixel, "nm"),
+                        "ap_image_pixel_size": ("Image Pixel Size", image_pixel, "nm"),
+                        "dp_image_store": ("Store resolution", store),
+                        "ap_width": ("Width", 108.0, "µm")}}
+
+    def test_an_image_stored_at_2048_uses_the_stored_image_pixel_size(self, detector):
+        # Pixel Size is the reference scan's; at 2048 x 1536 each stored pixel
+        # is half of it. Taking it made these frames twice too large.
+        tags = self.tag(105.5, 52.73, "2048 * 1536")
+        assert detector._parse_zeiss_cz_sem_tag(tags) == pytest.approx(52.73)
+
+    def test_the_text_form_prefers_image_pixel_size(self, detector):
+        text = "SmartSEM\nPixel Size = 105.5 nm\nImage Pixel Size = 52.73 nm\n"
+        assert detector._parse_zeiss_metadata(text, {}) == pytest.approx(52.73)
+
+
+JEOL_SIDECAR = (
+    "$CM_FORMAT TIFF\n$CM_INSTRUMENT JSM 6500F\n$CM_MAG 15000\n"
+    "$$SM_MICRON_BAR 160\n$$SM_MICRON_MARKER 1\xb5m\n$$SM_COLUMN_MODE SEM\n"
+    "$CM_IMAGE_RES 1280x1024\n")
+
+
+class TestJeolSidecar:
+    """A JEOL SEM records the scale only in a .txt beside the image."""
+
+    def write(self, tmp_path, name="S1_0001", ext=".tif", width=1280, text=JEOL_SIDECAR):
+        image = tmp_path / f"{name}{ext}"
+        if ext == ".tif":
+            tifffile.imwrite(str(image), np.zeros((16, width), np.uint8),
+                             resolution=(96, 96), resolutionunit=2)
+        else:
+            from PIL import Image
+            Image.fromarray(np.zeros((16, width), np.uint8)).save(image)
+        (tmp_path / f"{name}.txt").write_bytes(text.encode("latin-1"))
+        return image
+
+    def test_the_pixel_size_comes_from_the_bar_fields(self, detector, tmp_path):
+        image = self.write(tmp_path)
+        calibration = sc.from_metadata(detector, image)
+        assert calibration.nm_per_px == pytest.approx(1000 / 160)
+        assert calibration.trustworthy
+
+    def test_it_works_for_a_jpeg_too(self, detector, tmp_path):
+        image = self.write(tmp_path, ext=".jpg")
+        assert sc.from_metadata(detector, image).nm_per_px == pytest.approx(6.25)
+
+    def test_an_image_saved_at_half_size_has_pixels_twice_as_large(self, detector, tmp_path):
+        image = self.write(tmp_path, width=640)
+        assert sc.from_metadata(detector, image).nm_per_px == pytest.approx(12.5)
+
+    def test_a_sidecar_without_the_bar_fields_is_not_a_scale(self, detector, tmp_path):
+        image = self.write(tmp_path, text="$CM_INSTRUMENT JSM 6500F\n")
+        with pytest.raises(sc.ScaleError):
+            sc.from_metadata(detector, image)
+
+    def test_the_extension_may_be_upper_case(self, detector, tmp_path):
+        image = self.write(tmp_path)
+        (tmp_path / "S1_0001.txt").rename(tmp_path / "S1_0001.TXT")
+        assert sc.from_metadata(detector, image).nm_per_px == pytest.approx(6.25)
+
+
+class TestAmtCamera:
+    def test_xpixcal_is_pixels_per_unit(self, detector, tmp_path):
+        description = ("NIOSH\r8/30/2023\r40000\rXpixCal=620.662000\r"
+                       "YpixCal=620.662000\rUnit=um\r##fv3\r2048")
+        path = write_tiff(tmp_path / "amt.tif", description=description,
+                          resolution=(293, 293), resolution_unit=2)
         calibration = sc.from_metadata(detector, path)
-        assert calibration.method == "tiff_resolution"
-        assert not calibration.trustworthy
-        assert calibration.provenance == "tiff_resolution+unconfirmed"
-        assert calibration.warning
+        assert calibration.nm_per_px == pytest.approx(1000 / 620.662)
+        assert calibration.trustworthy

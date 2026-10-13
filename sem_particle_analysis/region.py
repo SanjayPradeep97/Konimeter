@@ -14,15 +14,24 @@ spurious particles on a TEM frame that were the grid bar's texture. Excluding
 them costs nothing when they are absent and is the difference between a usable
 count and a meaningless one when they are present.
 
-The first two turn out to be one thing: a large, near-black region touching the
-frame edge. Particles are neither that dark nor that large, and a genuine object
-running off the edge is not saturated black, so a single rule serves both.
+The first two turn out to be one thing: a large, near-black, featureless region
+touching the frame edge. A genuine object running off the edge is textured, so a
+single rule serves both.
+
+What is excluded must never reach a particle. The background of an SEM filter is
+often as dark as a grid bar, and the first version of this rule took that
+background, filled in every particle sitting on it, and grew the result into the
+particles' edges: on 300 test images it removed real particles from analysis on
+dozens of SEM frames. So the region is grown only into dark pixels, and only
+pinholes in it are filled.
 """
 
 import numpy as np
 from skimage import measure, morphology
 
-from ._compat import binary_closing, binary_dilation, fill_holes
+from scipy import ndimage as ndi
+
+from ._compat import binary_closing
 
 # A blocked region reads as near-black: not merely darker than its surroundings
 # but close to the floor of the frame's own range. Held as a fraction of that
@@ -39,8 +48,19 @@ BLOCKED_MIN_FRACTION = 0.004
 EDGE_TOUCH_PX = 2
 
 # Grown by this much before exclusion, to take in the soft shoulder where a
-# vignette or grid bar fades into the image.
+# vignette or grid bar fades into the image. Grown only into pixels at most
+# SHOULDER_LEVEL_FRACTION up the frame's range, so never into a particle.
 BLOCKED_MARGIN_PX = 6
+SHOULDER_LEVEL_FRACTION = 0.3
+
+# A beam-blocked area carries nothing but detector noise. Grid bars and aperture
+# corners on the 286 test images measured 1-10 grey levels of standard deviation
+# inside; dark specimen regions mostly 10-55.
+BLOCKED_MAX_STD = 12.0
+
+# Holes in a blocked region up to this size are noise and are filled. Anything
+# larger is something visible in it, so it is not blocked there.
+BLOCKED_PINHOLE_PX = 64
 
 
 def _grey(image):
@@ -50,7 +70,8 @@ def _grey(image):
 def blocked_area(image, level_fraction=BLOCKED_LEVEL_FRACTION,
                  min_fraction=BLOCKED_MIN_FRACTION, margin=BLOCKED_MARGIN_PX):
     """
-    Large near-black regions reaching the frame edge — beam-blocked, not sample.
+    Large, near-black, featureless regions reaching the frame edge: beam-blocked,
+    not sample.
 
     Args:
         image (np.ndarray): Greyscale or RGB frame.
@@ -72,8 +93,15 @@ def blocked_area(image, level_fraction=BLOCKED_LEVEL_FRACTION,
     if not dark.any():
         return blocked
 
-    # Close pinholes so a speckled vignette is one region rather than thousands.
-    dark = fill_holes(binary_closing(dark, morphology.disk(3)))
+    # Close pinholes so a speckled vignette is one region rather than thousands,
+    # but leave anything bigger: a hole in a dark region is something visible.
+    shoulder = grey <= low + SHOULDER_LEVEL_FRACTION * (high - low)
+    dark = binary_closing(dark, morphology.disk(3)) & shoulder
+    holes, count = ndi.label(ndi.binary_fill_holes(dark) & ~dark)
+    if count:
+        sizes = np.bincount(holes.ravel())
+        pinholes = np.flatnonzero(sizes <= BLOCKED_PINHOLE_PX)
+        dark |= np.isin(holes, pinholes[pinholes > 0])
 
     edge = np.zeros(grey.shape, dtype=bool)
     edge[:EDGE_TOUCH_PX, :] = edge[-EDGE_TOUCH_PX:, :] = True
@@ -87,10 +115,19 @@ def blocked_area(image, level_fraction=BLOCKED_LEVEL_FRACTION,
         component = labels == region.label
         if not (component & edge).any():
             continue          # floating in the field: that is sample
+        inner = ndi.binary_erosion(component, morphology.disk(4))
+        values = grey[inner] if inner.any() else grey[component]
+        if values.std() * 255.0 / (high - low) > BLOCKED_MAX_STD:
+            continue          # textured: an object or background, not a blocked beam
         blocked |= component
 
     if blocked.any() and margin > 0:
-        blocked = binary_dilation(blocked, morphology.disk(margin))
+        # Grow into the soft shoulder only: dark pixels next to the region.
+        grown = blocked.copy()
+        step = morphology.disk(1)
+        for _ in range(margin):
+            grown = ndi.binary_dilation(grown, step) & (shoulder | grown)
+        blocked = grown
     return blocked
 
 
