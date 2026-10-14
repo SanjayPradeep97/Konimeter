@@ -32,16 +32,15 @@ few seconds and each click about two.
 1. **Choose a micrograph**, or press **Next** to step through them. The list
    is in a fixed shuffled order.
 2. **SAM makes a first guess.** Before any click, SAM is prompted at the
-   darkest large object away from the frame edge (marked with a ring), and the
-   mask it returns is classified straight away. The prediction, the four class
-   probabilities and the expert's label appear beside the image.
+   darkest large object away from the frame edge (the prompt is not shown),
+   and the largest dark one of the three masks it returns is classified
+   straight away. The prediction, the four class probabilities and the
+   expert's label appear beside the image.
 3. **If the outline is wrong, click.** With **Particle** selected, a click on
    the particle replaces the first guess and segments from your click; with
    **Background**, a click marks something the mask should leave out. After
    that, clicks add up: each one re-runs SAM on all of them and re-classifies.
-4. **Undo** steps back one click, **Reset** returns to the first guess, and
-   **Show expert mask** classifies the mask from the paper's dataset for the
-   same image instead: the reference answer.
+4. **Undo** steps back one click, and **Reset** returns to the first guess.
 
 When a mask is brighter than its surroundings the page says it is probably
 support film rather than presenting a label for a patch of background as if
@@ -65,7 +64,8 @@ it meant something.
 | `ATTRIBUTION.md` | licence and credit for the images |
 
 The page is tested in `tests/test_demo.py` (no weights needed) and, with SAM
-and the classifier, on all sixty images in `tests/test_demo_models.py`.
+and the classifier, on all sixty images in `tests/test_demo_models.py`, which
+also checks that the shipped classifier labels every expert mask correctly.
 
 ## What the classifier is, exactly
 
@@ -113,7 +113,8 @@ meant something. That sensitivity is the point of the demo: the label is a
 function of the mask, and the mask is a function of the clicks.
 
 **With no click at all**, the first guess gives the right class on **54 of the
-60** images (`tests/test_demo_models.py` measures it). The six it gets wrong
+60** images (`tests/test_demo_models.py` measures it); keeping SAM's
+highest-scoring mask instead would give 44. The six it gets wrong
 are two faint fibres (`CNT-Fiber-0338`, `CNT-Fiber-0358`), three clusters where
 a denser knot or a separate dark particle is prompted instead of the open
 network (`CNT-Cluster-0051`, `-0055`, `-0446`), and one frame where the

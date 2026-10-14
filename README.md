@@ -59,11 +59,17 @@ was called SAM-SEM-Segmentation, and links to that name redirect here.)
 One conda environment, `cnt-vfm`, runs everything on this branch:
 
 ```bash
-conda env create -f environment.yml          # NVIDIA GPU (CUDA 12.8 wheels)
-conda env create -f environment-cpu.yml      # no CUDA: macOS, or CPU-only machines
+conda env create -f environment.yml          # Windows or Linux with an NVIDIA GPU (CUDA 12.8)
+conda env create -f environment-cpu.yml      # macOS, or Windows / Linux without an NVIDIA GPU
 conda activate cnt-vfm
 python classification/check_env.py
 ```
+
+Either file makes the same environment, `cnt-vfm`; choose one. On a Mac with
+Apple silicon the demo runs SAM on the Mac's GPU. The CPU file is built and
+tested on Windows, macOS and Linux by this branch's continuous integration;
+the GPU file is for the RTX 5080 the reproduction below was timed on, and
+hosted CI has no GPU to test it with.
 
 The CUDA file pins the `+cu128` PyTorch build so an RTX 50-series card works
 (an unpinned `torch` resolves to a CPU-only wheel); the CPU file takes PyTorch,

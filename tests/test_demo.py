@@ -230,17 +230,24 @@ class TestCorrectingTheMask:
         assert s.mask.any() and s.pred == "Fiber"
         assert "first guess" in app.report(s) and "Expert label" in app.report(s)
 
+    def test_the_automatic_prompt_is_never_drawn(self, app):
+        s = opened(app)
+        assert s.clicks == []
+        app.click(app.NEGATIVE, s, Select(100, 100))
+        assert [label for _point, label in s.clicks] == [0]
+
     def test_a_click_on_the_particle_replaces_the_first_guess(self, app):
         s = opened(app)
         app.click(app.POSITIVE, s, Select(100, 100))
-        assert len(s.points) == 1 and not s.first_guess
+        assert len(s.points) == 1 and not s.first_guess and not s.seeded
+        assert len(s.clicks) == 1 and "from 1 click" in app.report(s)
         scale = s.gray.shape[1] / app.DISPLAY_W
         assert s.points[0] == pytest.approx([100 * scale, 100 * scale])
 
     def test_a_background_click_trims_the_first_guess(self, app):
         s = opened(app)
         app.click(app.NEGATIVE, s, Select(100, 100))
-        assert s.labels == [1, 0]
+        assert s.labels == [1, 0] and s.seeded
 
     def test_later_clicks_add_up(self, app):
         s = opened(app)
@@ -255,16 +262,6 @@ class TestCorrectingTheMask:
         app.click(app.POSITIVE, s, Select(100, 100))
         app.undo(s)
         assert s.points == guess and s.first_guess
-
-    def test_the_expert_mask_is_classified_and_undo_returns_to_the_clicks(self, app):
-        s = opened(app)
-        app.expert(s)
-        assert s.source == "expert" and "Expert mask" in app.report(s)
-        expert_mask = np.asarray(Image.open(DEMO / "masks" / "CNT-Fiber-0014_mask.png")
-                                 .convert("L")) > 127
-        assert (s.mask == expert_mask).all()
-        app.undo(s)
-        assert s.source == "sam" and s.first_guess
 
     def test_reset_makes_the_first_guess_again(self, app):
         s = opened(app)

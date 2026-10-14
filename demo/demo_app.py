@@ -11,12 +11,12 @@ demo_images.csv, select_demo_images.py and ATTRIBUTION.md):
                            mask and the paper's five-fold MLP ensemble
                            predicts Fiber / Cluster / Matrix / MatrixSurface
 
-The first guess (prompting.auto_point) prompts SAM at the darkest large object
-away from the frame edge, as if it had been clicked.  A positive click while
-only the first guess is in place starts again from that click; after that,
-clicks add up, and a click after the expert mask goes back to the clicks.  "Show the expert mask" classifies the mask from the paper's
-dataset for the same image instead.  The classifier never sees the image as a
-whole: only the pixels inside the mask.
+The first guess needs no click: SAM is prompted, out of sight, at the darkest
+large object away from the frame edge (prompting.auto_point), and the largest
+dark one of its three masks is shown.  A click on the particle replaces that
+starting point; a click on the background trims the mask instead; after that,
+clicks add up.  The classifier never sees the image as a whole: only the
+pixels inside the mask.
 
 Start it with run_demo.bat / run_demo.sh, or
 
@@ -58,14 +58,13 @@ POSITIVE, NEGATIVE = "Particle (+)", "Background (−)"
 
 # ----------------------------------------------------------------- data
 def demo_images():
-    """stem -> (image path, expert mask path or None, expert label)."""
+    """stem -> (image path, expert label)."""
     images = {}
     for row in csv.DictReader(open(HERE / "demo_images.csv")):
         stem = Path(row["filename"]).stem
         path = HERE / "images" / row["category"] / f"{stem}.png"
-        mask = HERE / "masks" / f"{stem}_mask.png"
         if path.exists():
-            images[stem] = (path, mask if mask.exists() else None, row["category"])
+            images[stem] = (path, row["category"])
     return images
 
 
@@ -124,15 +123,24 @@ class Session:
     def __init__(self):
         self.stem = None; self.gray = None; self.rgb = None
         self.points = []; self.labels = []
-        self.first_guess = False      # the only point is the automatic one
-        self.history = []             # earlier (points, labels, first_guess)
+        self.seeded = False           # points[0] is the automatic prompt, not shown
+        self.history = []             # earlier (points, labels, seeded)
         self.mask = None; self.pred = None; self.probs = None
-        self.source = ""              # "sam" or "expert"
         self.mode = MODE_RULE
         self.timing = ""
 
+    @property
+    def first_guess(self):
+        """Nothing clicked yet: only the automatic prompt."""
+        return self.seeded and len(self.points) == 1
+
+    @property
+    def clicks(self):
+        """The points the analyst placed, with their labels."""
+        return list(zip(self.points, self.labels))[1 if self.seeded else 0:]
+
     def remember(self):
-        self.history.append((list(self.points), list(self.labels), self.first_guess))
+        self.history.append((list(self.points), list(self.labels), self.seeded))
 
 
 def segment(s):
@@ -142,9 +150,7 @@ def segment(s):
     masks, scores, _ = Models.sam.predict(np.array(s.points, float),
                                           np.array(s.labels, int))
     s.mask = choose_mask(masks, scores, s.gray, s.mode)
-    t_sam = time.time() - t0
-    s.source = "sam"
-    classify(s, f"SAM {1000 * t_sam:.0f} ms")
+    classify(s, f"SAM {1000 * (time.time() - t0):.0f} ms")
 
 
 def classify(s, sam_time=""):
@@ -159,7 +165,7 @@ def classify(s, sam_time=""):
 
 def first_guess(s):
     s.points, s.labels = [list(auto_point(s.gray))], [1]
-    s.first_guess, s.history = True, []
+    s.seeded, s.history = True, []
     segment(s)
 
 
@@ -181,15 +187,10 @@ def render(s):
     im = Image.fromarray(out.clip(0, 255).astype(np.uint8))
     draw = ImageDraw.Draw(im)
     scale = DISPLAY_W / w
-    shown = [] if s.source == "expert" else zip(s.points, s.labels)
-    for (x, y), label in shown:
+    for (x, y), label in s.clicks:
         cx, cy = x * scale, y * scale
         fill = (60, 210, 60) if label == 1 else (230, 50, 50)
-        if s.first_guess:             # the automatic prompt: a ring, not a dot
-            draw.ellipse([cx - 9, cy - 9, cx + 9, cy + 9], outline=fill, width=4)
-        else:
-            draw.ellipse([cx - 7, cy - 7, cx + 7, cy + 7], fill=fill,
-                         outline="white", width=2)
+        draw.ellipse([cx - 7, cy - 7, cx + 7, cy + 7], fill=fill, outline="white", width=2)
     return im
 
 
@@ -200,7 +201,7 @@ def report(s):
     if s.pred is None:
         return ('<div class="muted">No mask. Click on a particle, or press '
                 '<b>Reset</b>.</div>')
-    _, _, truth = IMAGES[s.stem]
+    _, truth = IMAGES[s.stem]
     agrees = s.pred == truth
     rows = "".join(
         f'<div class="bar-row"><span class="bar-name">{c}</span>'
@@ -208,21 +209,16 @@ def report(s):
         f'rgb{COLOURS[c]}"></span></span><span class="bar-pct">{100 * p:.1f}%</span></div>'
         for c, p in zip(CLASSES, s.probs))
     area = int(s.mask.sum())
-    if s.source == "expert":
-        how = "Expert mask from the paper's dataset"
-    elif s.first_guess:
-        how = "SAM, first guess (no clicks)"
-    else:
-        clicks = len(s.points)
-        how = f"SAM, from {clicks} click{'' if clicks == 1 else 's'}"
+    clicks = len(s.clicks)
+    how = ("SAM's first guess, before any click" if not clicks
+           else f"SAM, from {clicks} click{'' if clicks == 1 else 's'}")
     note = ""
-    if s.source == "sam":
-        inside, outside = float(s.gray[s.mask].mean()), float(s.gray[~s.mask].mean())
-        if inside >= outside:
-            note = ("This mask is brighter than its surroundings, so it is probably "
-                    "support film. Click on the dark particle.")
-        elif area > 0.5 * s.mask.size:
-            note = "The mask covers most of the frame. Click on the film to trim it."
+    inside, outside = float(s.gray[s.mask].mean()), float(s.gray[~s.mask].mean())
+    if inside >= outside:
+        note = ("This mask is brighter than its surroundings, so it is probably "
+                "support film. Click on the dark particle.")
+    elif area > 0.5 * s.mask.size:
+        note = "The mask covers most of the frame. Click on the film to trim it."
     colour = "rgb{}".format(COLOURS[s.pred])
     return (
         f'<div class="pred-label" style="color:{colour}">{s.pred}</div>'
@@ -278,7 +274,7 @@ def open_image(stem, s, progress=gr.Progress()):
     if problem:
         return None, f'<div class="note">{problem}</div>', s
     s.stem = stem
-    path, _, _ = IMAGES[stem]
+    path, _ = IMAGES[stem]
     s.gray = np.asarray(Image.open(path).convert("L"))
     s.rgb = np.stack([s.gray] * 3, -1)
     progress(0.8, desc="Segmenting")
@@ -302,12 +298,11 @@ def click(kind, s, evt: gr.SelectData):
     point, label = [x * scale, y * scale], 1 if kind == POSITIVE else 0
     s.remember()
     if s.first_guess and label == 1:
-        # A click on the particle replaces the first guess: it says where the
-        # particle is. A negative click trims the first guess instead.
-        s.points, s.labels = [point], [label]
+        # A click on the particle replaces the automatic prompt: it says where
+        # the particle is. A background click trims the first guess instead.
+        s.points, s.labels, s.seeded = [point], [label], False
     else:
         s.points.append(point); s.labels.append(label)
-    s.first_guess = False
     segment(s)
     return view(s)
 
@@ -315,7 +310,7 @@ def click(kind, s, evt: gr.SelectData):
 def undo(s):
     if s is None or s.gray is None or not s.history:
         return view(s or Session())
-    s.points, s.labels, s.first_guess = s.history.pop()
+    s.points, s.labels, s.seeded = s.history.pop()
     segment(s)
     return view(s)
 
@@ -327,22 +322,9 @@ def reset(s):
     return view(s)
 
 
-def expert(s):
-    if s is None or s.gray is None:
-        return view(s or Session())
-    _, mask_path, _ = IMAGES[s.stem]
-    if mask_path is None:
-        return view(s)
-    s.remember()
-    s.mask = np.asarray(Image.open(mask_path).convert("L")) > 127
-    s.source, s.timing = "expert", ""
-    classify(s)
-    return view(s)
-
-
 def set_mode(mode, s):
     s.mode = mode
-    if s.gray is not None and s.source == "sam":
+    if s.gray is not None:
         segment(s)
     return view(s)
 
@@ -404,7 +386,6 @@ def build_app():
                 with gr.Row():
                     undo_btn = gr.Button("Undo")
                     reset_btn = gr.Button("Reset")
-                    expert_btn = gr.Button("Show expert mask")
                 with gr.Accordion("Which of SAM's three masks is kept", open=False):
                     mode = gr.Radio([MODE_RULE, MODE_SCORE], value=MODE_RULE,
                                     show_label=False)
@@ -417,7 +398,6 @@ def build_app():
         image.select(click, [kind, state], outputs)
         undo_btn.click(undo, [state], outputs)
         reset_btn.click(reset, [state], outputs)
-        expert_btn.click(expert, [state], outputs)
         mode.change(set_mode, [mode, state], outputs)
 
     # SAM's predictor holds one image at a time, so requests run one by one.
