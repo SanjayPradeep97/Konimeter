@@ -381,6 +381,16 @@ def reset_point_refine():
         return None, f"❌ Error: {str(e)}"
 
 
+# One line per correction tool, shown when it is chosen.
+TOOL_HINTS = {
+    "delete": "Click each outline that is not a particle, then Apply.",
+    "add": "Click a particle SAM missed: it is outlined from your click. Then Apply.",
+    "merge": "Click the pieces of one particle, then Apply to join them.",
+    "point_refine": "Click a particle to redraw its outline, or background to draw "
+                    "a new one. Include adds to it, Exclude cuts away. Then Apply.",
+}
+
+
 def set_click_mode(mode):
     """Set click mode and return status message."""
     state.click_mode = mode
@@ -400,21 +410,11 @@ def set_click_mode(mode):
         state.point_refine_preview_mask = None
         state.point_refine_logits = None
 
-    # Return appropriate status message and visibility for point refine controls
-    mode_messages = {
-        "delete": "🚫 Remove — click any particle that isn't one. "
-                  "Clicking background does nothing.",
-        "add": "➕ Add — click something SAM missed; it segments what you clicked.",
-        "merge": "🔗 Merge — click two or more pieces that are really one particle.",
-        "point_refine": "🎯 Redraw — click to include, switch to exclude to cut "
-                        "away. Start on a particle to fix it, on background to "
-                        "draw a new one.",
-    }
-
+    # What the tool does, said where the analyst is looking when choosing it.
     # Show point refine controls only in point_refine mode
     show_controls = (mode == "point_refine")
 
-    return mode_messages.get(mode, "Unknown mode"), gr.update(visible=show_controls)
+    return TOOL_HINTS.get(mode, ""), gr.update(visible=show_controls)
 
 
 def apply_refinement_changes(progress=gr.Progress()):

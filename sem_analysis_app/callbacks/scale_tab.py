@@ -268,42 +268,75 @@ def frame_summary():
 
 def frame_header():
     """
-    One-line summary of the current frame, for the working tab's header.
+    The bar across the top of the working tab: which image, at what scale.
 
     Everything an analyst needs to know they are on the right image, working at
     the right scale, without leaving the tab they are clicking in.
     """
     if state.current_image is None:
-        return "### No image loaded\nPick one from the Gallery."
+        return ('<div class="work-head"><span class="wh-name">No image open</span>'
+                '<span class="wh-chip">Pick one in the Gallery</span></div>')
 
     total = len(state.image_paths) or 1
     name = (os.path.basename(str(state.image_paths[state.current_index]))
             if state.image_paths else "image")
+    chips = [(f"{state.current_index + 1} of {total}", "")]
 
     cal = getattr(state, "scale_calibration", None)
     if cal is None:
-        scale = "⚠️ no scale — sizes in pixels"
+        chips.append(("No scale: sizes in pixels", "warn"))
     else:
-        scale = f"{cal.nm_per_px:.4g} nm/px"
-        if not cal.trustworthy:
-            scale += " (unconfirmed)"
+        chips.append((f"{cal.nm_per_px:.4g} nm/px"
+                      + ("" if cal.trustworthy else " · unconfirmed"),
+                      "" if cal.trustworthy else "warn"))
 
     kind = state.microscope_kind()
-    bits = [f"**{name}**", f"{state.current_index + 1} of {total}", scale,
-            kind or "microscope not set"]
+    chips.append((kind, "") if kind else ("Microscope not set", "warn"))
 
     info = getattr(state, "region_info", None) or {}
     blocked = 1 - info.get("analysable_fraction", 1.0)
     if blocked > 0.005:
-        bits.append(f"{100 * blocked:.0f}% excluded")
+        chips.append((f"{100 * blocked:.0f}% excluded", ""))
 
-    count = len(state.analyzer.regions) if state.analyzer is not None else None
-    if count is not None:
-        bits.append(f"**{count} particles**")
+    if state.analyzer is not None:
+        count = len(state.analyzer.regions)
+        chips.append((f"{count} particle{'' if count == 1 else 's'}", "strong"))
 
+    spans = "".join(f'<span class="wh-chip {tone}">{_esc(text)}</span>'
+                    for text, tone in chips)
     warning = cal.warning if cal is not None else None
-    line = "  ·  ".join(bits)
-    return f"{line}\n\n⚠️ {warning}" if warning else line
+    alert = f'<div class="wh-warning">{_esc(warning)}</div>' if warning else ""
+    return (f'<div class="work-head"><span class="wh-name">{_esc(name)}</span>'
+            f'{spans}</div>{alert}')
+
+
+def measurement_summary():
+    """The current image's particles in a few numbers, for the working tab."""
+    analyzer = getattr(state, "analyzer", None)
+    if analyzer is None:
+        return '<div class="kv-empty">Nothing measured yet.</div>'
+    m = analyzer.get_measurements(in_nm=True)
+    if not m["num_particles"]:
+        return _rows([("Particles", "0", None, None)])
+    unit = "nm" if m["unit"] == "nm" else "px"
+    d = np.asarray(m["diameters"], dtype=float)
+
+    def size(value):          # 3 significant figures, never in e-notation
+        return f"{value:,.0f}" if value >= 1000 else f"{value:.3g}"
+
+    rows = [("Particles", str(m["num_particles"]), None, None),
+            ("Median diameter", f"{size(np.median(d))} {unit}", None, None),
+            ("Mean diameter", f"{size(d.mean())} {unit}", None, None),
+            ("Range", f"{size(d.min())} – {size(d.max())} {unit}", None, None)]
+    ratios = m.get("aspect_ratios")
+    if ratios:
+        rows.append(("Median aspect ratio", f"{np.median(ratios):.2f}", None, None))
+    return _rows(rows)
+
+
+def work_status():
+    """The top bar and the measurements, which every edit changes together."""
+    return frame_header(), measurement_summary()
 
 
 def set_crop_override(percent):
@@ -748,14 +781,17 @@ def check_outputs():
     """
     level, message = review()
     view = scale_check_view()
+    # One set of updates per tab: Gradio takes the value out of an update as it
+    # applies it, so an update shared by two fields left the second showing 0.
     value, unit = printed_value_fields()
+    work_value, work_unit = printed_value_fields()
     return (scale_span_payload(),
             gr.update(value=view, visible=view is not None),   # on the Scale tab
             gr.update(visible=level == "check"),
             message,
             view,                                              # on the working tab
             value, unit, gr.update(visible=value.get("visible", False)),
-            value, unit,
+            work_value, work_unit,
             gr.Tabs(selected=2) if level == "stop" else gr.update())
 
 

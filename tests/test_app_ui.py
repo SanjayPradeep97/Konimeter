@@ -73,3 +73,25 @@ def test_there_is_no_typed_folder_path(app):
     # typed path to it any more.
     labels = [getattr(block, "label", None) for block in app.blocks.values()]
     assert "Image folder" not in labels
+
+
+@pytest.mark.parametrize("name, returned", [
+    ("choose_candidate", 5),
+    ("use_best_candidate", 5),
+    ("work_status", 2),
+    ("restore_working_tab", 5),
+    ("segment_with_sam", 2),
+    ("set_particle_polarity", 2),
+])
+def test_working_tab_handlers_fill_their_outputs(app, name, returned):
+    handlers = wired(app, name)
+    assert handlers, f"{name} is not wired to anything"
+    for handler in handlers:
+        assert len(handler.outputs) == returned
+
+
+def test_opening_an_image_fills_what_it_is_wired_to(app):
+    from sem_analysis_app.callbacks.workflow import OPEN_COUNT
+
+    for handler in wired(app, "open_current_image"):
+        assert len(handler.outputs) == OPEN_COUNT

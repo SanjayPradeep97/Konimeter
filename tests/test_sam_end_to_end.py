@@ -47,7 +47,7 @@ def segmented(sam_checkpoint):
     state.particle_choice = "auto"
     state.scale_info = {"conversion": SCALE_NM_PER_PX}
 
-    _viz, status, _choices = segment_with_sam(progress=no_progress)
+    _candidates, status = segment_with_sam(progress=no_progress)
     *_, analysis_status, _results, _stats = select_mask_and_analyze("Option 1",
                                                                    progress=no_progress)
     yield state, status, analysis_status
@@ -57,13 +57,13 @@ def segmented(sam_checkpoint):
 
 def test_sam_offers_candidates(segmented):
     state, status, _ = segmented
-    assert status.startswith("✅"), status
+    assert not status.startswith("❌"), status
     assert state.candidates
 
 
 def test_the_first_candidate_finds_every_disk_at_its_true_size(segmented):
     state, _, analysis_status = segmented
-    assert analysis_status.startswith("✅"), analysis_status
+    assert "from the best candidate" in analysis_status, analysis_status
     measurements = state.analyzer.get_measurements(in_nm=True)
     assert measurements["num_particles"] == len(DISKS)
     assert measurements["unit"] == "nm"

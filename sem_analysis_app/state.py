@@ -145,6 +145,8 @@ class AppState:
         self.analysable_region = None
         self.region_info = {}
         self.selected_mask_index = None
+        # Set by ranking when the best candidate should be put to use next.
+        self.use_best_pending = False
         self.analyzer = None
         self.click_mode = "delete"
         self.pending_deletes = []
@@ -380,6 +382,16 @@ class AppState:
             'point_refine_preview_mask': self.point_refine_preview_mask.copy() if self.point_refine_preview_mask is not None else None,
             'point_refine_logits': self.point_refine_logits.copy() if self.point_refine_logits is not None else None
         })
+
+    def has_corrections(self):
+        """
+        True once the analyst has changed the mask in use, applied or queued.
+
+        Re-ranking or re-segmenting may then offer new candidates, but must not
+        swap one in on its own: that would throw the corrections away.
+        """
+        return bool(self.mask_history or self.pending_deletes or self.pending_add_masks
+                    or self.pending_merge or self.point_refine_points)
 
     def clear_pending_edits(self):
         """

@@ -5,8 +5,8 @@ import gradio as gr
 
 from sem_particle_analysis import ParticleAnalyzer
 from ..visualization import (
+    candidate_thumbnails,
     create_particle_visualization,
-    visualize_three_masks,
     create_results_dataframe,
     create_summary_statistics_table,
 )
@@ -31,12 +31,31 @@ def _particle_polarity():
     return {"SEM": False, "TEM": True}.get(state.microscope_kind())
 
 
+def candidate_gallery(selected=None):
+    """
+    The ranked candidates as thumbnails, ready for the gallery.
+
+    Args:
+        selected: Index of the candidate in use, highlighted; None for none.
+    """
+    if not state.masks:
+        return gr.update(value=[], selected_index=None)
+    thumbs = candidate_thumbnails(state.cropped_image, state.masks)
+    items = [(thumb, "Best" if i == 0 else f"Option {i + 1}")
+             for i, thumb in enumerate(thumbs)]
+    return gr.update(value=items, selected_index=selected)
+
+
 def _rank_and_show():
     """
-    Rank the outlines SAM last returned and draw them as the candidates.
+    Rank the outlines SAM last returned and offer them as the candidates.
+
+    The best one is then put to use by use_best_candidate, unless the analyst
+    has already corrected the mask in use: swapping in a new candidate would
+    throw that work away, so then they are only offered.
 
     Returns:
-        tuple: (candidate image, status, mask_choice update)
+        tuple: (candidate gallery update, status)
     """
     # Everything that is not specimen: beam-blocked area — an SEM aperture
     # vignette, a TEM grid bar — and a scale bar printed inside the frame.
@@ -55,31 +74,48 @@ def _rank_and_show():
 
     if not state.candidates:
         state.masks = None
-        return (None,
-                "❌ SAM found nothing that stands out from the background. Draw "
-                "the particles with the Add tool, or try a smaller Smallest particle.",
-                gr.update(choices=[], value=None))
+        state.use_best_pending = False
+        return (candidate_gallery(),
+                "SAM found nothing that stands out from the background. Draw the "
+                "particles with the Add tool, or lower Smallest particle.")
 
     state.masks = [c["mask"] for c in state.candidates]
-    labels = [f"Option {i + 1}" for i in range(len(state.candidates))]
-    mask_viz = visualize_three_masks(state.cropped_image, state.masks, labels)
+    keep = state.analyzer is not None and state.has_corrections()
+    state.use_best_pending = not keep
+    if keep:
+        return (candidate_gallery(),
+                "New candidates. Your corrections are kept; click a candidate to "
+                "start again from it instead.")
+    return candidate_gallery(selected=0), ""
 
-    # Offer exactly the candidates that survived ranking; a fixed three-way
-    # choice lets the analyst pick an option that does not exist.
-    return (mask_viz,
-            f"✅ {len(state.masks)} candidate(s), best first. "
-            f"Pick one, then refine with clicks.",
-            gr.update(choices=labels, value=labels[0]))
+
+def use_best_candidate(progress=gr.Progress()):
+    """
+    Put the best candidate to use, when ranking has just said to.
+
+    Returns:
+        tuple: as select_mask_and_analyze, or no change at all.
+    """
+    if not getattr(state, "use_best_pending", False) or not state.masks:
+        return (gr.update(),) * 5
+    state.use_best_pending = False
+    return select_mask_and_analyze("Option 1", progress)
+
+
+def choose_candidate(evt: gr.SelectData, progress=gr.Progress()):
+    """Use the candidate whose thumbnail was clicked."""
+    index = evt.index if isinstance(evt.index, int) else (evt.index or [0])[0]
+    return select_mask_and_analyze(f"Option {index + 1}", progress)
 
 
 def segment_with_sam(progress=gr.Progress()):
     """Segment image with SAM."""
     try:
         if state.cropped_image is None:
-            return None, "❌ No image to segment (detect scale first)", gr.update()
+            return candidate_gallery(), "No image open."
 
         if state.segmenter is None:
-            return None, "❌ SAM not initialized", gr.update()
+            return candidate_gallery(), "Load the SAM model on the Setup tab first."
 
         progress(0.3, desc="Running SAM...")
         raw_masks, state.scores = state.segmenter.segment_image(
@@ -93,7 +129,7 @@ def segment_with_sam(progress=gr.Progress()):
         return shown
 
     except Exception as e:
-        return None, f"❌ Error: {str(e)}", gr.update()
+        return candidate_gallery(), f"❌ Error: {str(e)}"
 
 
 def set_particle_polarity(choice):
@@ -102,7 +138,7 @@ def set_particle_polarity(choice):
     candidates to match. SAM's outlines are kept, so this takes no time.
 
     Returns:
-        tuple: (candidate image, status, mask_choice update)
+        tuple: (candidate gallery update, status)
     """
     state.particle_choice = choice or "auto"
     return rerank()
@@ -114,17 +150,17 @@ def rerank():
     way round the particles are has changed.
 
     Returns:
-        tuple: (candidate image, status, mask_choice update)
+        tuple: (candidate gallery update, status)
     """
     segmenter = state.segmenter
     if (segmenter is None or getattr(segmenter, "masks", None) is None
             or state.cropped_image is None
             or segmenter.masks[0].shape != state.cropped_image.shape[:2]):
-        return gr.update(), gr.update(), gr.update()
+        return gr.update(), gr.update()
     try:
         return _rank_and_show()
     except Exception as e:
-        return gr.update(), f"❌ Error: {str(e)}", gr.update()
+        return gr.update(), f"❌ Error: {str(e)}"
 
 
 def select_mask_and_analyze(mask_choice, progress=gr.Progress()):
@@ -132,8 +168,8 @@ def select_mask_and_analyze(mask_choice, progress=gr.Progress()):
     try:
         if state.masks is None:
             return (gr.update(), gr.update(),
-                    "❌ No candidate to use. Press Segment, or draw the particles "
-                    "with the Add tool.", gr.update(), gr.update())
+                    "No candidate to use. Press Segment again, or draw the "
+                    "particles with the Add tool.", gr.update(), gr.update())
 
         # Parse mask index
         mask_index = int(mask_choice.split()[1]) - 1
@@ -195,10 +231,10 @@ def select_mask_and_analyze(mask_choice, progress=gr.Progress()):
         progress(1.0, desc="Complete!")
 
         noun = "particle" if num_particles == 1 else "particles"
-        status = (f"✅ Detected {num_particles} {noun} ({measurements['unit']}) "
-                  f"- Ready for refinement")
+        which = "the best candidate" if mask_index == 0 else f"option {mask_index + 1}"
+        status = f"{num_particles} {noun} from {which}."
         if conversion is None:
-            status += " ⚠️ no scale, sizes are in pixels"
+            status += " No scale yet, so sizes are in pixels."
 
         # Return: refine_viz, refine_results, analysis_status, current_results, current_stats
         return particle_viz, results_df, status, results_df, stats_df

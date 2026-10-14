@@ -28,6 +28,8 @@ from .scale_tab import (
     confirm_scale,
     frame_header,
     frame_summary,
+    measurement_summary,
+    work_status,
     live_point_readout,
     prepare_scale_tab,
     restore_scale_tab,
@@ -36,6 +38,8 @@ from .scale_tab import (
     set_crop_override,
 )
 from .segmentation import (
+    choose_candidate,
+    use_best_candidate,
     segment_with_sam,
     select_mask_and_analyze,
     set_particle_polarity,
@@ -81,6 +85,7 @@ __all__ = [
     "browse_for_folder",
     "check_and_remove_duplicates",
     "check_outputs",
+    "choose_candidate",
     "CHECKPOINTS_FOUND",
     "CHECKPOINTS_MISSING",
     "clear_all_particles",
@@ -98,6 +103,7 @@ __all__ = [
     "export_results",
     "frame_header",
     "frame_summary",
+    "measurement_summary",
     "get_current_visualization",
     "get_session_summary",
     "handle_image_click",
@@ -130,4 +136,6 @@ __all__ = [
     "toggle_particle_numbers",
     "undo_last_action",
     "update_histogram_plots",
+    "use_best_candidate",
+    "work_status",
 ]

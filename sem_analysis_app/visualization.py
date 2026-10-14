@@ -254,6 +254,31 @@ def visualize_three_masks(image, masks, labels):
     return img_array
 
 
+def candidate_thumbnails(image, masks, width=360):
+    """
+    Each candidate mask over a small copy of the frame, for picking between them.
+
+    Returns:
+        list[np.ndarray]: RGB images, one per mask, ``width`` pixels wide.
+    """
+    if image is None or not masks:
+        return []
+    frame = np.asarray(image)
+    if frame.ndim == 2:
+        frame = np.stack([frame] * 3, axis=-1)
+    frame = frame[..., :3].astype(np.uint8)
+    height = max(1, int(round(frame.shape[0] * width / frame.shape[1])))
+    small = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+    thumbs = []
+    for mask in masks:
+        m = cv2.resize(np.asarray(mask, dtype=np.uint8), (width, height),
+                       interpolation=cv2.INTER_NEAREST).astype(bool)
+        out = small.astype(np.float32)
+        out[m] = 0.45 * out[m] + 0.55 * np.array([230, 60, 60], np.float32)
+        thumbs.append(out.clip(0, 255).astype(np.uint8))
+    return thumbs
+
+
 def _column_names(measurements):
     """
     Area and diameter headers in the unit the numbers are actually in.

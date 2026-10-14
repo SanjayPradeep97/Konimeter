@@ -12,6 +12,7 @@ places to set it would mean two answers.
 import gradio as gr
 
 from sem_particle_analysis import discover_checkpoints
+from .callbacks.refinement import TOOL_HINTS
 from .callbacks.scale_tab import POINTS_HINT, UNITS
 
 from .callbacks import (
@@ -38,6 +39,8 @@ from .callbacks import (
     detect_scale_again,
     frame_header,
     frame_summary,
+    measurement_summary,
+    work_status,
     live_point_readout,
     read_box_scale,
     set_canvas_mode,
@@ -45,8 +48,9 @@ from .callbacks import (
     set_particle_polarity,
     rerank,
     # segmentation + refinement
+    choose_candidate,
     segment_with_sam,
-    select_mask_and_analyze,
+    use_best_candidate,
     apply_refinement_changes,
     clear_all_particles,
     clear_edge_particles,
@@ -77,10 +81,10 @@ from .callbacks import (
 # fit the rail on one line — what each does is spelled out in the status line
 # when it is picked, where it is read at the moment it matters.
 REFINE_MODES = [
-    ("delete", "🚫  Remove"),
-    ("add", "➕  Add"),
-    ("merge", "🔗  Merge"),
-    ("point_refine", "🎯  Redraw"),
+    ("delete", "Remove"),
+    ("add", "Add"),
+    ("merge", "Merge"),
+    ("point_refine", "Redraw"),
 ]
 
 APP_CSS = """
@@ -92,21 +96,48 @@ APP_CSS = """
    DOM for client code to write to them, so they are hidden rather than absent. */
 .scale-channel {display: none !important;}
 
-/* The frame header: one line that says where you are, always in view. */
-.frame-header {
-    padding: 10px 14px;
-    border-radius: 8px;
+/* ---- Segment & Refine -------------------------------------------------- */
+/* The bar across the top: which image, at what scale, and the way on. */
+.work-bar {
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 10px;
     background: var(--background-fill-secondary);
     border: 1px solid var(--border-color-primary);
-    font-size: 14px;
-    line-height: 1.5;
 }
-.frame-header p {margin: 0;}
+.work-head {display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px;}
+.wh-name {font-weight: 600; font-size: 15px; margin-right: 4px; word-break: break-all;}
+.wh-chip {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--background-fill-primary);
+    border: 1px solid var(--border-color-primary);
+    color: var(--body-text-color-subdued);
+    white-space: nowrap;
+}
+.wh-chip.warn {background: rgba(217, 119, 6, .12); border-color: transparent; color: #b45309;}
+.wh-chip.strong {font-weight: 600; color: var(--body-text-color);}
+.dark .wh-chip.warn {color: #fbbf24;}
+.wh-warning {font-size: 13px; margin-top: 6px; color: #b45309;}
+.dark .wh-warning {color: #fbbf24;}
+.save-status p {font-size: 13px; margin: 0; color: var(--body-text-color-subdued);}
+.work-bar button {white-space: nowrap;}
 
-/* Tool rail: keep it compact so the image gets the room. */
-.tool-rail .gr-form, .tool-rail .gr-box {border: none; background: transparent;}
-.tool-rail label {font-size: 13px;}
-.tool-rail .gr-button {width: 100%;}
+/* The scale reading to look at before measuring, when one needs a look. */
+.check-banner {
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: rgba(217, 119, 6, .08);
+    border: 1px solid rgba(217, 119, 6, .35);
+}
+.check-banner p {margin: 0; font-size: 14px;}
+.check-banner button {white-space: nowrap;}
+
+/* SAM's candidates, small enough to sit three across beside the image. */
+.candidates .thumbnail-item {border-radius: 6px;}
+.candidates .grid-wrap {overflow: hidden !important; max-height: none !important;}
 
 /* The image being worked on is the point of the page. */
 .work-image img {
@@ -137,6 +168,7 @@ APP_CSS = """
    so all three fit beside the image without scrolling. */
 .inspector {gap: 10px !important;}
 .inspector > .column {gap: 8px !important;}
+.inspector button {white-space: nowrap;}
 .panel-head {align-items: center;}
 .panel-head button {flex-grow: 0 !important;}
 .panel-title {
@@ -426,123 +458,116 @@ def create_interface():
             # TAB 3: Segment & Refine
             # ============================================================
             with gr.Tab("🔬 Segment & Refine", id=3):
-                header = gr.Markdown("### No image loaded\nPick one from the Gallery.",
-                                     elem_classes=["frame-header"])
+                # Which image, at what scale, and the way on: one bar that stays
+                # in view, so saving never needs a scroll past the image.
+                with gr.Row(equal_height=True, elem_classes=["work-bar"]):
+                    header = gr.HTML(frame_header(), padding=False, scale=4)
+                    skip_btn = gr.Button("Skip", scale=0, min_width=80)
+                    save_btn = gr.Button("Save", scale=0, min_width=80)
+                    save_next_btn = gr.Button("Save & next", variant="primary",
+                                              scale=0, min_width=130)
+                save_status = gr.Markdown("", elem_classes=["save-status"])
 
                 # Shown only for a reading nothing has vouched for yet. A scale
                 # that agrees with one already accepted never raises this, so
                 # working through a folder at one magnification is uninterrupted;
                 # a scale with a warning does not raise it either, because that
                 # one is worth going to the Scale tab for.
-                with gr.Row(visible=False) as scale_check_row:
-                    with gr.Column(scale=2):
-                        scale_check_msg = gr.Markdown("")
-                        with gr.Row():
-                            check_value = gr.Number(label="Bar's printed value",
-                                                    visible=False, min_width=110)
-                            check_unit = gr.Dropdown(choices=UNITS, label="Unit",
-                                                     visible=False, min_width=80)
-                        scale_check_btn = gr.Button("✔️ Scale is right — carry on",
-                                                    variant="primary", size="sm")
-                    with gr.Column(scale=3):
-                        scale_check_img = gr.Image(
-                            label="", show_label=False, height=150,
-                            interactive=False,
-                        )
+                with gr.Row(visible=False, equal_height=True,
+                            elem_classes=["check-banner"]) as scale_check_row:
+                    scale_check_img = gr.Image(show_label=False, height=72,
+                                               interactive=False, container=False,
+                                               buttons=[], scale=2, min_width=180)
+                    scale_check_msg = gr.Markdown("")
+                    check_value = gr.Number(label="Printed value", show_label=False,
+                                            container=False, visible=False,
+                                            min_width=80, scale=0)
+                    check_unit = gr.Dropdown(choices=UNITS, label="Unit",
+                                             show_label=False, container=False,
+                                             visible=False, min_width=76, scale=0)
+                    scale_check_btn = gr.Button("Confirm scale", variant="primary",
+                                                scale=0, min_width=140)
 
-                with gr.Row():
-                    # ---- tool rail --------------------------------------
-                    with gr.Column(scale=1, min_width=260,
-                                   elem_classes=["tool-rail"]):
-
-                        gr.Markdown("Segment", elem_classes=["step-title"])
-                        min_particle_size_slider = gr.Slider(
-                            minimum=5, maximum=200, value=30, step=1,
-                            label="Smallest particle (px)",
-                            info="Anything below this is noise",
-                        )
-                        particle_choice = gr.Radio(
-                            choices=[("Auto", "auto"), ("Darker", "dark"),
-                                     ("Brighter", "bright")],
-                            value="auto", label="Particles are",
-                            info="…than the background. Auto follows the "
-                                 "microscope chosen on Setup",
-                        )
-                        segment_btn = gr.Button("🤖 Segment", variant="primary")
-                        mask_choice = gr.Radio(
-                            choices=["Option 1", "Option 2", "Option 3"],
-                            value="Option 1", label="Candidate",
-                            info="Ranked best-first by contrast",
-                        )
-                        analyze_btn = gr.Button("✓ Use this candidate",
-                                                variant="primary")
-                        segment_status = gr.Textbox(label="", interactive=False,
-                                                    lines=2, show_label=False)
-
-                        gr.Markdown("---")
-                        gr.Markdown("Correct", elem_classes=["step-title"])
-                        click_mode_radio = gr.Radio(
-                            choices=[(label, value) for value, label in REFINE_MODES],
-                            value="delete", label="Tool",
-                            info="Clicks queue up; nothing changes until Apply",
-                        )
-
-                        with gr.Group(visible=False) as point_refine_controls:
-                            point_type_radio = gr.Radio(
-                                choices=[("✓ include", "positive"),
-                                         ("✗ exclude", "negative")],
-                                value="positive", label="Next point",
-                            )
-                            reset_points_btn = gr.Button("Reset points", size="sm")
-
-                        with gr.Row():
-                            apply_btn = gr.Button("✓ Apply", variant="primary")
-                            undo_btn = gr.Button("↩️ Undo", variant="secondary")
-                        clear_pending_btn = gr.Button("Discard pending clicks",
-                                                      variant="secondary", size="sm")
-
-                        with gr.Accordion("Bulk cleanup", open=False):
-                            edge_buffer = gr.Slider(
-                                minimum=0, maximum=50, value=10, step=1,
-                                label="Edge buffer (px)",
-                            )
-                            clear_edges_btn = gr.Button("🧹 Drop edge particles",
-                                                        variant="secondary", size="sm")
-                            clear_all_btn = gr.Button("🗑️ Clear all — start blank",
-                                                      variant="stop", size="sm")
-
-                        show_numbers_checkbox = gr.Checkbox(
-                            label="Show particle numbers", value=True,
-                        )
-
+                with gr.Row(equal_height=False):
                     # ---- the image --------------------------------------
-                    with gr.Column(scale=4):
-                        # Open by default: choosing between the candidates is the
-                        # first thing that happens on this tab, and it cannot be
-                        # done without seeing them. Collapsed once one is chosen,
-                        # so the rest of the work gets the height.
-                        with gr.Accordion("Candidates — pick one, then Use it",
-                                          open=True) as candidate_panel:
-                            mask_viz = gr.Image(label="", show_label=False, height=300)
-                            analysis_status = gr.Textbox(label="", interactive=False,
-                                                         show_label=False, lines=1)
+                    with gr.Column(scale=3, min_width=480):
+                        refine_viz = gr.Image(type="numpy", show_label=False,
+                                              elem_classes=["work-image"],
+                                              height="calc(100vh - 230px)",
+                                              buttons=["fullscreen"])
 
-                        refine_viz = gr.Image(label="", type="numpy", show_label=False,
-                                              elem_classes=["work-image"], height=760)
-                        refine_status = gr.Textbox(label="", interactive=False,
-                                                   show_label=False, lines=1)
+                    # ---- outline, correct, measure ----------------------
+                    with gr.Column(scale=2, min_width=340, elem_classes=["inspector"]):
+                        with gr.Column(variant="panel"):
+                            with gr.Row(elem_classes=["panel-head"]):
+                                gr.HTML('<div class="panel-title">Outline</div>',
+                                        padding=False)
+                                segment_btn = gr.Button("Segment again", size="sm",
+                                                        scale=0, min_width=120)
+                            # SAM's candidates, best first. Clicking one puts it
+                            # to use; the best is in use from the start.
+                            candidates = gr.Gallery(show_label=False, container=False,
+                                                    columns=3, rows=1, height=152,
+                                                    allow_preview=False, buttons=[],
+                                                    object_fit="contain",
+                                                    interactive=False,
+                                                    elem_classes=["candidates"])
+                            segment_status = gr.Markdown("", elem_classes=["hint"])
+                            particle_choice = gr.Radio(
+                                choices=[("Auto", "auto"), ("Darker", "dark"),
+                                         ("Brighter", "bright")],
+                                value="auto", label="Particles are",
+                            )
+                            min_particle_size_slider = gr.Slider(
+                                minimum=5, maximum=200, value=30, step=1,
+                                label="Smallest particle (px)",
+                            )
 
-                gr.Markdown("---")
-                with gr.Row():
-                    save_next_btn = gr.Button("✅ Save & next", variant="primary",
-                                              size="lg", scale=2)
-                    save_btn = gr.Button("💾 Save, stay here", variant="secondary")
-                    skip_btn = gr.Button("⏭️ Skip", variant="secondary")
-                save_status = gr.Textbox(label="", interactive=False, show_label=False)
+                        with gr.Column(variant="panel"):
+                            gr.HTML('<div class="panel-title">Correct</div>',
+                                    padding=False)
+                            click_mode_radio = gr.Radio(
+                                choices=[(label, value) for value, label in REFINE_MODES],
+                                value="delete", show_label=False, container=False,
+                            )
+                            refine_status = gr.Markdown(TOOL_HINTS["delete"],
+                                                        elem_classes=["hint"])
+                            with gr.Row(visible=False, equal_height=True) as point_refine_controls:
+                                point_type_radio = gr.Radio(
+                                    choices=[("Include", "positive"),
+                                             ("Exclude", "negative")],
+                                    value="positive", show_label=False, container=False,
+                                )
+                                reset_points_btn = gr.Button("Reset points", size="sm",
+                                                             scale=0, min_width=110)
+                            with gr.Row():
+                                apply_btn = gr.Button("Apply", variant="primary",
+                                                      min_width=80)
+                                undo_btn = gr.Button("Undo", min_width=80)
+                                clear_pending_btn = gr.Button("Discard clicks",
+                                                              min_width=110)
+                            with gr.Accordion("Clean up", open=False):
+                                edge_buffer = gr.Slider(
+                                    minimum=0, maximum=50, value=10, step=1,
+                                    label="Edge margin (px)",
+                                )
+                                with gr.Row():
+                                    clear_edges_btn = gr.Button("Remove edge particles",
+                                                                size="sm", min_width=150)
+                                    clear_all_btn = gr.Button("Clear all", variant="stop",
+                                                              size="sm", min_width=90)
 
-                with gr.Accordion("Measurements for this image", open=False):
-                    refine_results = gr.Dataframe(label="", show_label=False,
-                                                  headers=["Particle ID", "Area", "Diameter"])
+                        with gr.Column(variant="panel"):
+                            gr.HTML('<div class="panel-title">Measurements</div>',
+                                    padding=False)
+                            measure_html = gr.HTML(measurement_summary(), padding=False)
+                            show_numbers_checkbox = gr.Checkbox(
+                                label="Number the particles on the image", value=True,
+                            )
+                            with gr.Accordion("Every particle", open=False):
+                                refine_results = gr.Dataframe(
+                                    show_label=False,
+                                    headers=["Particle ID", "Area", "Diameter"])
 
             # ============================================================
             # TAB 4: Results
@@ -609,8 +634,14 @@ def create_interface():
         # scale and frame, then segment. Kept as one list so the three entry
         # points cannot drift apart.
         OPEN_OUTPUTS = [scale_image_in, scale_message, scale_card, point_readout,
-                        frame_status, header, mask_viz, segment_status, mask_choice,
+                        frame_status, header, candidates, segment_status,
                         click_mode_radio, point_type_radio, refine_viz]
+        # Putting a candidate to use: its outlines, its numbers, what was done.
+        USE_OUTPUTS = [refine_viz, refine_results, segment_status, current_results,
+                       current_stats]
+        # The bar across the working tab and the measurements beside the image,
+        # which every edit changes together.
+        WORK_STATUS = [header, measure_html]
         RELOAD_CANVAS = "() => { window.SCALE && window.SCALE.load(); }"
 
         # Everything that shows what the scale is and how much it should be
@@ -660,8 +691,8 @@ def create_interface():
                  ).then(lambda: check_outputs()[:-1] + (gr.update(),),
                         outputs=CHECK_OUTPUTS).then(None, js=RELOAD_CANVAS)
         app.load(restore_working_tab,
-                 outputs=[mask_viz, segment_status, mask_choice, refine_viz,
-                          refine_results, header, candidate_panel])
+                 outputs=[candidates, segment_status, refine_viz, refine_results,
+                          header]).then(work_status, outputs=WORK_STATUS)
 
         # ---- Gallery ----
         gallery.select(
@@ -669,8 +700,8 @@ def create_interface():
             outputs=[refine_viz, selected_image_info, tabs, click_mode_radio],
         ).then(
             open_current_image, outputs=OPEN_OUTPUTS,
-        ).then(  # a new image means new candidates to choose between
-            lambda: gr.update(open=True), outputs=[candidate_panel]
+        ).then(use_best_candidate, outputs=USE_OUTPUTS).then(
+            work_status, outputs=WORK_STATUS,
         ).then(check_outputs, outputs=CHECK_OUTPUTS).then(None, js=RELOAD_CANVAS)
 
         # ---- Scale & Frame ----
@@ -685,7 +716,7 @@ def create_interface():
         read_box_btn.click(read_box_scale, inputs=[scale_box_out],
                            outputs=[scale_message, scale_card]).then(
             frame_summary, outputs=[frame_status]).then(
-            frame_header, outputs=[header]).then(
+            work_status, outputs=WORK_STATUS).then(
             check_outputs, outputs=CHECK_OUTPUTS)
 
         # Live feedback as the two points are placed.
@@ -696,7 +727,7 @@ def create_interface():
             apply_two_points, inputs=[scale_points_out, bar_value, bar_unit],
             outputs=[scale_message, scale_card]).then(
             frame_summary, outputs=[frame_status]).then(
-            frame_header, outputs=[header]).then(
+            work_status, outputs=WORK_STATUS).then(
             check_outputs, outputs=CHECK_OUTPUTS)
 
         for reset in (reset_box_btn, reset_points_canvas_btn):
@@ -704,13 +735,13 @@ def create_interface():
 
         confirm_scale_btn.click(confirm_scale, inputs=[printed_value, printed_unit],
                                 outputs=[confirm_message, scale_card]).then(
-            frame_header, outputs=[header]).then(
+            work_status, outputs=WORK_STATUS).then(
             check_outputs, outputs=CHECK_OUTPUTS)
         detect_again_btn.click(
             detect_scale_again,
             outputs=[scale_image_in, scale_message, scale_card, point_readout,
                      frame_status]).then(
-            frame_header, outputs=[header]).then(
+            work_status, outputs=WORK_STATUS).then(
             check_outputs, outputs=CHECK_OUTPUTS).then(None, js=RELOAD_CANVAS)
 
         # Accepting from the working tab, so checking a reading costs a glance
@@ -737,30 +768,27 @@ def create_interface():
                                         inputs=[min_particle_size_slider],
                                         outputs=[segment_status])
         # The microscope sets which way round particles are expected: re-sort
-        # the candidates on screen to match. .input, not .change, here and below:
-        # restoring a choice on a page load must not re-sort.
+        # the candidates to match, and use the new best one unless the mask has
+        # been corrected. .input, not .change, here and below: restoring a
+        # choice on a page load must not re-sort.
         microscope_choice.input(set_microscope, inputs=[microscope_choice],
                                 outputs=[microscope_choice]).then(
-            rerank, outputs=[mask_viz, segment_status, mask_choice]).then(
-            frame_summary, outputs=[frame_status]).then(frame_header, outputs=[header])
+            rerank, outputs=[candidates, segment_status]).then(
+            use_best_candidate, outputs=USE_OUTPUTS).then(
+            frame_summary, outputs=[frame_status]).then(
+            work_status, outputs=WORK_STATUS)
 
         # Re-sorts SAM's existing outlines; nothing is re-run.
         particle_choice.input(set_particle_polarity, inputs=[particle_choice],
-                              outputs=[mask_viz, segment_status, mask_choice]
-                              ).then(frame_summary, outputs=[frame_status]).then(
-            lambda: gr.update(open=True), outputs=[candidate_panel])
-        segment_btn.click(
-            segment_with_sam, outputs=[mask_viz, segment_status, mask_choice],
-        ).then(  # new candidates to look at, so open the panel again
-            lambda: gr.update(open=True), outputs=[candidate_panel])
-
-        analyze_btn.click(
-            select_mask_and_analyze, inputs=[mask_choice],
-            outputs=[refine_viz, refine_results, analysis_status,
-                     current_results, current_stats],
-        ).then(frame_header, outputs=[header]).then(
-            # Chosen: give the height back to the frame being corrected.
-            lambda: gr.update(open=False), outputs=[candidate_panel])
+                              outputs=[candidates, segment_status]).then(
+            use_best_candidate, outputs=USE_OUTPUTS).then(
+            frame_summary, outputs=[frame_status]).then(
+            work_status, outputs=WORK_STATUS)
+        segment_btn.click(segment_with_sam, outputs=[candidates, segment_status]).then(
+            use_best_candidate, outputs=USE_OUTPUTS).then(
+            work_status, outputs=WORK_STATUS)
+        candidates.select(choose_candidate, outputs=USE_OUTPUTS).then(
+            work_status, outputs=WORK_STATUS)
 
         click_mode_radio.change(set_click_mode, inputs=[click_mode_radio],
                                 outputs=[refine_status, point_refine_controls])
@@ -777,25 +805,25 @@ def create_interface():
             apply_refinement_changes,
             outputs=[refine_viz, refine_results, refine_status,
                      current_results, current_stats],
-        ).then(frame_header, outputs=[header])
+        ).then(work_status, outputs=WORK_STATUS)
 
         clear_pending_btn.click(clear_pending_changes,
                                 outputs=[refine_viz, refine_status])
         undo_btn.click(undo_last_action,
                        outputs=[refine_viz, refine_results, refine_status,
                                 current_results, current_stats]).then(
-            frame_header, outputs=[header])
+            work_status, outputs=WORK_STATUS)
 
         clear_edges_btn.click(
             clear_edge_particles, inputs=[edge_buffer],
             outputs=[refine_viz, refine_results, refine_status,
                      current_results, current_stats],
-        ).then(frame_header, outputs=[header])
+        ).then(work_status, outputs=WORK_STATUS)
         clear_all_btn.click(
             clear_all_particles,
             outputs=[refine_viz, refine_results, refine_status,
                      current_results, current_stats],
-        ).then(frame_header, outputs=[header])
+        ).then(work_status, outputs=WORK_STATUS)
 
         # ---- Save and advance ----
         save_btn.click(save_current_results, outputs=[save_status, gallery])
@@ -803,14 +831,14 @@ def create_interface():
         save_next_btn.click(
             save_and_next,
             outputs=[save_status, gallery, selected_image_info] + OPEN_OUTPUTS,
-        ).then(  # a new image means new candidates to choose between
-            lambda: gr.update(open=True), outputs=[candidate_panel]
+        ).then(use_best_candidate, outputs=USE_OUTPUTS).then(
+            work_status, outputs=WORK_STATUS,
         ).then(check_outputs, outputs=CHECK_OUTPUTS).then(None, js=RELOAD_CANVAS)
 
         skip_btn.click(
             skip_to_next, outputs=[selected_image_info] + OPEN_OUTPUTS,
-        ).then(  # a new image means new candidates to choose between
-            lambda: gr.update(open=True), outputs=[candidate_panel]
+        ).then(use_best_candidate, outputs=USE_OUTPUTS).then(
+            work_status, outputs=WORK_STATUS,
         ).then(check_outputs, outputs=CHECK_OUTPUTS).then(None, js=RELOAD_CANVAS)
 
         # ---- Results ----

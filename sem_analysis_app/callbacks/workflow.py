@@ -14,14 +14,14 @@ import os
 import gradio as gr
 
 from ..state import state
-from .segmentation import segment_with_sam
+from .segmentation import candidate_gallery, segment_with_sam
 from .results import save_current_results
 from .scale_tab import frame_header, prepare_scale_tab
 from ..visualization import for_display
 
 
 # How many outputs open_current_image fills (ui.OPEN_OUTPUTS).
-OPEN_COUNT = 12
+OPEN_COUNT = 11
 
 
 def _load_index(index):
@@ -61,19 +61,18 @@ def auto_process_current_image(progress=gr.Progress()):
     this is called.
 
     Returns:
-        tuple: (mask_viz, segment_status, mask_choice)
+        tuple: (candidate gallery, segment_status)
     """
     if state.current_image is None:
-        return None, "No image loaded", gr.update()
+        return candidate_gallery(), "No image open."
     if state.segmenter is None:
-        return (None, "⚠️ SAM is not initialised — load a checkpoint on the Setup tab",
-                gr.update())
+        return candidate_gallery(), "Load the SAM model on the Setup tab first."
 
     progress(0.4, desc="Segmenting...")
     try:
         return segment_with_sam(progress)
     except Exception as exc:
-        return None, f"❌ Segmentation error: {exc}", gr.update()
+        return candidate_gallery(), f"❌ Segmentation error: {exc}"
 
 
 def open_current_image(progress=gr.Progress()):
@@ -85,11 +84,11 @@ def open_current_image(progress=gr.Progress()):
 
     Returns:
         tuple: (canvas_payload, scale_message, scale_card, point_readout,
-                frame_status, header, mask_viz, segment_status, mask_choice,
-                tool, point_type, working view)
+                frame_status, header, candidates, segment_status, tool,
+                point_type, working view)
     """
     payload, message, card, hint, frame = prepare_scale_tab()
-    mask_viz, segment_status, choice = auto_process_current_image(progress)
+    candidates, segment_status = auto_process_current_image(progress)
     # The header is built last, so it can report the particle count. The two
     # tool controls are set to what reset_image_state left in state, so the
     # screen cannot show Merge while clicks queue deletions. The working view
@@ -97,7 +96,7 @@ def open_current_image(progress=gr.Progress()):
     # outlines under the new image's candidates until one was chosen.
     frame_view = state.cropped_image if state.cropped_image is not None else state.current_image
     return (payload, message, card, hint, frame, frame_header(),
-            mask_viz, segment_status, choice, state.click_mode, state.point_type,
+            candidates, segment_status, state.click_mode, state.point_type,
             for_display(frame_view))
 
 
@@ -108,36 +107,22 @@ def restore_working_tab():
     whatever SAM had actually returned.
 
     Returns:
-        tuple: (mask_viz, segment_status, mask_choice, working view, measurements,
-                header, candidate panel)
+        tuple: (candidates, segment_status, working view, measurements, header)
     """
     from .refinement import get_current_visualization
-    from ..visualization import create_results_dataframe, visualize_three_masks
+    from ..visualization import create_results_dataframe
 
     if state.current_image is None:
-        return (None, "", gr.update(choices=[], value=None), None, None,
-                frame_header(), gr.update())
+        return candidate_gallery(), "", None, None, frame_header()
 
     frame = state.cropped_image if state.cropped_image is not None else state.current_image
-    if state.masks:
-        labels = [f"Option {i + 1}" for i in range(len(state.masks))]
-        chosen = state.selected_mask_index
-        value = labels[chosen] if chosen is not None and chosen < len(labels) else labels[0]
-        candidates = visualize_three_masks(frame, state.masks, labels)
-        choice = gr.update(choices=labels, value=value)
-        status = f"↻ Reconnected — {len(labels)} candidate(s), best first."
-    else:
-        candidates, choice = None, gr.update(choices=[], value=None)
-        status = "↻ Reconnected — press Segment to get candidates."
-
+    candidates = candidate_gallery(selected=state.selected_mask_index)
     if state.analyzer is not None:
         view = get_current_visualization()
         table = create_results_dataframe(state.analyzer.get_measurements(in_nm=True))
     else:
         view, table = for_display(frame), None
-    # Candidates open until one is chosen, as when the image was first opened.
-    return (candidates, status, choice, view, table, frame_header(),
-            gr.update(open=state.analyzer is None))
+    return candidates, "", view, table, frame_header()
 
 
 def save_and_next(progress=gr.Progress()):
@@ -153,8 +138,8 @@ def save_and_next(progress=gr.Progress()):
 
     Returns:
         tuple: (save_status, gallery, image_info, canvas_payload, scale_message,
-                scale_card, point_readout, frame_status, header, mask_viz,
-                segment_status, mask_choice)
+                scale_card, point_readout, frame_status, header, candidates,
+                segment_status, tool, point_type, working view)
     """
     save_status, gallery_data = save_current_results()
     if not save_status.startswith("✅"):
@@ -176,8 +161,8 @@ def skip_to_next(progress=gr.Progress()):
 
     Returns:
         tuple: (image_info, canvas_payload, scale_message, scale_card,
-                point_readout, frame_status, header, mask_viz, segment_status,
-                mask_choice)
+                point_readout, frame_status, header, candidates, segment_status,
+                tool, point_type, working view)
     """
     image, info = _load_index(state.current_index + 1)
     if image is None:
