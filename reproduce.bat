@@ -7,7 +7,7 @@ REM
 REM  Needs:   conda env  cnt-vfm   (environment.yml or environment-cpu.yml)
 REM           CNT_BASE   the data root: <CNT_BASE>\NIOSH Dataset\CNT-*\*.tif and
 REM                      <CNT_BASE>\NIOSH Dataset\Masks\masks\*_mask.png
-REM                      (see README.md, "Data")
+REM                      (see classification\REPRODUCE.md, "The data")
 REM  Optional: CNT_TEX   directory holding main.tex / supplementary.tex.  Without
 REM                      it step 7 checks against classification\manuscript_numbers.json,
 REM                      the snapshot of the numbers as printed in the paper.
@@ -29,11 +29,11 @@ set "PYTHONUNBUFFERED=1"
 set "KMP_DUPLICATE_LIB_OK=TRUE"
 
 if "%CNT_BASE%"=="" (
-  echo CNT_BASE is not set. Point it at the directory holding "NIOSH Dataset\" -- see README.md.
+  echo CNT_BASE is not set. Point it at the directory holding "NIOSH Dataset\" -- see classification\REPRODUCE.md.
   exit /b 1
 )
 if not exist "%CNT_BASE%\NIOSH Dataset" (
-  echo "%CNT_BASE%\NIOSH Dataset" does not exist. See README.md, "Data".
+  echo "%CNT_BASE%\NIOSH Dataset" does not exist. See classification\REPRODUCE.md, "The data".
   exit /b 1
 )
 set "BENCHD=%CNT_BASE%\Encoder Benchmark"

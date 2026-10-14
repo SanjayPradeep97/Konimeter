@@ -8,8 +8,8 @@ demo_images.csv, select_demo_images.py and ATTRIBUTION.md):
     click to correct   ->  SAM re-runs on the clicks (positive: particle,
                            negative: background)
     every mask         ->  DINOv2 hypercolumn features are pooled INSIDE the
-                           mask and the paper's five-fold MLP ensemble
-                           predicts Fiber / Cluster / Matrix / MatrixSurface
+                           mask and the paper's classifier predicts
+                           Fiber / Cluster / Matrix / MatrixSurface
 
 The first guess needs no click: SAM is prompted, out of sight, at the darkest
 large object away from the frame edge (prompting.auto_point), and the largest
@@ -358,7 +358,7 @@ def build_app():
         gr.Markdown(
             "## Segment a carbon-nanotube particle, and see it classified\n"
             "SAM outlines the particle; DINOv2 features pooled **inside the outline** "
-            "go to the paper's five-fold MLP ensemble (92.7 %, 166/179, on the held-out "
+            "go to the paper's classifier (92.7 %, 166/179, on the held-out "
             f"test set). {len(IMAGES)} held-out test micrographs, none seen in training.")
         state = gr.State(Session())
 

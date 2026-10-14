@@ -196,7 +196,7 @@ def load_splits(pkl_path: Path, root: Path | None = None, root_remap=None):
         raise SystemExit(
             f"could not locate masks for {len(missing_mask)} images, e.g. {missing_mask[:5]}.\n"
             f"  looked under {cnt_paths.masks_dir()}\n"
-            f"  Masks are distributed with the paper's data archive (see README); set CNT_MASKS\n"
+            f"  Masks are distributed with the paper's data archive (see classification/REPRODUCE.md); set CNT_MASKS\n"
             f"  if they live elsewhere.")
     seen = {}
     for s_, rows in out.items():
@@ -751,7 +751,7 @@ def preflight(out_dir, device, seconds=15):
             break
     log(f"\n  log -> {path}")
     log("  If the machine reboots during this, that is a POWER or THERMAL fault,")
-    log("  not a bug in this script -- user code cannot reset a PC. See README.")
+    log("  not a bug in this script -- user code cannot reset a PC.")
 
 
 # ---------------------------------------------------------------- main

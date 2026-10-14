@@ -2,8 +2,8 @@
 
 A small Gradio page that joins the two halves of the paper end to end. You open
 a TEM micrograph, SAM outlines the particle, and the paper's classifier
-(frozen DINOv2 ViT-B/14 hypercolumns pooled **inside the mask**, then the
-five-fold MLP ensemble) predicts Fiber / Cluster / Matrix / MatrixSurface. If
+(frozen DINOv2 ViT-B/14 hypercolumns pooled **inside the mask**, then an MLP)
+predicts Fiber / Cluster / Matrix / MatrixSurface. If
 the outline is wrong, you click to correct it, and the label follows the mask.
 Sixty micrographs and their expert masks ship with the repository.
 
@@ -13,19 +13,20 @@ Just mask and label.
 
 ## Start it
 
-```bash
-conda env create -f environment-cpu.yml    # once, at the repo root; environment.yml with an NVIDIA GPU
-./demo/run_demo.sh                         # Linux / macOS
-demo\run_demo.bat                          # Windows
+Follow *Run the demo* in the [README](../README.md): create the `cnt-vfm`
+environment once, then
+
+```
+conda activate cnt-vfm
+python demo/demo_app.py
 ```
 
-The launcher activates the `cnt-vfm` environment and opens
-http://127.0.0.1:7861 (`python demo/demo_app.py` does the same in an active
-environment). The first time, the page shows **Download SAM ViT-B**: the
-checkpoint (358 MB) is saved in `sam_weights/` and found there from then on.
-DINOv2's weights (330 MB) are fetched by `timm` from the Hugging Face hub the
-first time a micrograph is opened. Without a GPU, opening a micrograph takes a
-few seconds and each click about two.
+or double-click `demo\run_demo.bat` on Windows (`demo/run_demo.sh` on macOS).
+The page opens at http://127.0.0.1:7861. The first time, it shows **Download
+SAM ViT-B**: the checkpoint (358 MB) is saved in `sam_weights/` and found there
+from then on. DINOv2's weights (330 MB) are fetched by `timm` from the Hugging
+Face hub the first time a micrograph is opened. Without a GPU, opening a
+micrograph takes a few seconds and each click about two.
 
 ## Using it
 

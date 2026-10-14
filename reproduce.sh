@@ -6,7 +6,7 @@
 #  says.  See reproduce.bat for the stage-by-stage description.
 #
 #  Needs:    conda env cnt-vfm active (environment.yml or environment-cpu.yml)
-#            CNT_BASE  the data root (README.md, "Data")
+#            CNT_BASE  the data root (classification/REPRODUCE.md, "The data")
 #  Optional: CNT_TEX   directory holding main.tex / supplementary.tex
 #            --force   recompute stage 3 (~3 h on a GPU) instead of using the
 #                      shipped results
@@ -19,11 +19,11 @@ OUT="$REPO/results"
 export PYTHONUNBUFFERED=1 KMP_DUPLICATE_LIB_OK=TRUE
 
 if [ -z "${CNT_BASE:-}" ]; then
-  echo 'CNT_BASE is not set. Point it at the directory holding "NIOSH Dataset/" -- see README.md.' >&2
+  echo 'CNT_BASE is not set. Point it at the directory holding "NIOSH Dataset/" -- see classification/REPRODUCE.md.' >&2
   exit 1
 fi
 if [ ! -d "$CNT_BASE/NIOSH Dataset" ]; then
-  echo "\"$CNT_BASE/NIOSH Dataset\" does not exist. See README.md, \"Data\"." >&2
+  echo "\"$CNT_BASE/NIOSH Dataset\" does not exist. See classification/REPRODUCE.md, \"The data\"." >&2
   exit 1
 fi
 BENCHD="$CNT_BASE/Encoder Benchmark"
