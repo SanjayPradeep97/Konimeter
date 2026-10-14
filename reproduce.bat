@@ -38,9 +38,8 @@ if not exist "%CNT_BASE%\NIOSH Dataset" (
 )
 set "BENCHD=%CNT_BASE%\Encoder Benchmark"
 
-REM Found and activated the way run_app.bat does it, wherever conda is installed.
+REM Found and activated wherever conda is installed.
 if not "%CONDA_DEFAULT_ENV%"=="cnt-vfm" (
-  set "SEM_ENV=cnt-vfm"
   call "%REPO%\scripts\activate_env.bat" || exit /b 1
 )
 

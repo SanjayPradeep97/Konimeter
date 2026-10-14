@@ -1,26 +1,20 @@
+"""Shared set-up for the demo's tests."""
 import getpass
 import os
 import sys
 import tempfile
 from pathlib import Path
 
-import matplotlib
 import pytest
 
-# As the app does at start-up (sem_analysis_app/__main__.py): plots are drawn
-# off-screen. Left to choose, matplotlib picks a GUI backend, and on a Windows
-# runner whose Tcl install is incomplete the first figure fails to open.
-matplotlib.use("Agg")
+REPO = Path(__file__).resolve().parents[1]
+# The demo's modules are imported the way demo_app.py imports them.
+for path in (REPO / "demo", REPO, REPO / "classification"):
+    sys.path.insert(0, str(path))
 
-# Test helpers live alongside the tests rather than in the installed package.
-sys.path.insert(0, str(Path(__file__).parent))
-# The library under test, taken from this checkout rather than from whatever is
-# installed. Everything here imports sem_particle_analysis by name, and a
-# development install resolves that name to the directory pip was pointed at —
-# which inside a git worktree is the *other* checkout. Without this the suite
-# silently exercises code that is not the code being changed, and a new argument
-# to a library function comes back as "unexpected keyword argument".
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# PyTorch and NumPy each ship an OpenMP runtime; on Windows they otherwise
+# refuse to share a process.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 
 def _ensure_usable_temp_root():
@@ -69,50 +63,19 @@ def _ensure_usable_temp_root():
 
 _ensure_usable_temp_root()
 
-# Where download_sam_weights.py puts SAM weights. SAM_CHECKPOINT names a file
-# elsewhere.
-_WEIGHT_DIRS = [
-    Path(__file__).parent.parent / "sam_weights",
-]
-_WEIGHT_FILES = {
-    "vit_b": "sam_vit_b_01ec64.pth",
-    "vit_h": "sam_vit_h_4b8939.pth",
-}
-
-
-def find_sam_checkpoint(model_type="vit_b"):
-    """Return a path to local SAM weights, or None if they aren't downloaded."""
-    env = os.environ.get("SAM_CHECKPOINT")
-    if env and Path(env).exists():
-        return Path(env)
-    for directory in _WEIGHT_DIRS:
-        candidate = directory / _WEIGHT_FILES[model_type]
-        if candidate.exists():
-            return candidate
-    return None
-
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "slow: needs SAM weights or OCR models; deselect with -m 'not slow'")
-
-
-@pytest.fixture(scope="session")
-def scale_detector():
-    """
-    A single ScaleDetector for the whole session.
-
-    EasyOCR takes several seconds to spin up its models, so building one per test
-    would dominate the runtime.
-    """
-    pytest.importorskip("easyocr")
-    from sem_particle_analysis import ScaleDetector
-
-    return ScaleDetector(use_gpu=False)
+    config.addinivalue_line(
+        "markers", "slow: needs the SAM checkpoint and DINOv2's weights; "
+                   "deselect with -m 'not slow'")
 
 
 @pytest.fixture(scope="session")
 def sam_checkpoint():
-    path = find_sam_checkpoint("vit_b")
-    if path is None:
-        pytest.skip("SAM weights not available; run python download_sam_weights.py")
+    import download_sam_weights as weights
+
+    named = os.environ.get("SAM_CHECKPOINT")
+    path = Path(named) if named else weights.checkpoint_path("vit_b")
+    if not path.is_file():
+        pytest.skip("SAM ViT-B not downloaded; run python download_sam_weights.py --model vit_b")
     return path

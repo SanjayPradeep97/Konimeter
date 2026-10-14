@@ -49,3 +49,5 @@ jobs:
           cd classification
           python test_cache.py
           python test_yolo_adapter.py
+      - name: The demo's tests that need no model weights, in this environment
+        run: pytest -m "not slow"

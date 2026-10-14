@@ -2,26 +2,22 @@ name: tests
 
 on:
   push:
-    branches: [main, publication]
+    branches: [publication]
   pull_request:
+    branches: [publication]
   workflow_dispatch:
 
 jobs:
-  fast:
-    # The suite without SAM weights or OCR models, installed as the README
-    # describes, on every platform the app is used on.
-    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+  demo:
+    # The demo's tests that need no model weights, on every platform a
+    # reviewer might use: the shipped images, the first guess, the mask rule,
+    # the SAM download and every button of the page.
+    name: demo / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.11"]
-        include:
-          - os: ubuntu-latest
-            python: "3.10"
-          - os: ubuntu-latest
-            python: "3.12"
     env:
       KMP_DUPLICATE_LIB_OK: "TRUE"
       PYTHONIOENCODING: utf-8
@@ -29,41 +25,28 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python }}
-      - name: Install PyTorch (CPU)
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            pip install torch torchvision
-          else
-            pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          fi
-      - name: Install the package
-        run: pip install -e . pytest
+          python-version: "3.11"
+      - name: Install what the page needs
+        run: pip install "gradio>=6" numpy scipy scikit-image pillow pytest
       - name: Run the tests
         run: pytest -m "not slow"
 
   launcher:
-    # run_app.bat and reproduce.bat find conda and the environment through
-    # scripts/activate_env.bat; this runs it as a double-click would, with an
-    # environment under the current name and under the name before the rename.
-    name: windows launcher / ${{ matrix.env }}
+    # run_demo.bat and reproduce.bat find conda and the cnt-vfm environment
+    # through scripts/activate_env.bat; this runs it as a double-click would.
+    name: windows launcher
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        env: [konimeter, SEM_analysis]
     steps:
       - uses: actions/checkout@v5
       - uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest
-          activate-environment: ${{ matrix.env }}
+          activate-environment: cnt-vfm
           python-version: "3.11"
           auto-activate-base: false
       - name: activate_env.bat activates the environment
         shell: cmd
         run: |
-          set "SEM_ENV="
+          set "CNT_ENV="
           call scripts\activate_env.bat || exit /b 1
-          python -c "import os, sys; p = os.environ.get('CONDA_PREFIX', ''); print(p); sys.exit(not p.lower().endswith('${{ matrix.env }}'.lower()))"
+          python -c "import os, sys; p = os.environ.get('CONDA_PREFIX', ''); print(p); sys.exit(not p.lower().endswith('cnt-vfm'))"

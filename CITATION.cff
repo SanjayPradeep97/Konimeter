@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite the paper below."
-title: "Konimeter: segmentation and measurement of particles in electron micrographs"
+title: "Code and results for: Quantification and Classification of Carbon Nanotubes in Electron Micrographs using Vision Foundation Models"
 type: software
 repository-code: "https://github.com/SanjayPradeep97/Konimeter"
 license: MIT

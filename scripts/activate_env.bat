@@ -1,13 +1,12 @@
 @echo off
-REM Activate a conda environment: konimeter, the one the README sets up, or
-REM SEM_analysis, its name before the rename, so that existing installs keep
-REM working. Set SEM_ENV to use another.
+REM Activate the cnt-vfm conda environment, the one the README sets up. Set
+REM CNT_ENV to use another.
 REM
 REM Conda is found wherever it was installed: through CONDA_EXE when started
 REM from an Anaconda Prompt, otherwise in the usual Anaconda, Miniconda and
 REM Miniforge install folders.
 
-if defined SEM_ENV (set "ENV_NAMES=%SEM_ENV%") else (set "ENV_NAMES=konimeter SEM_analysis")
+if defined CNT_ENV (set "ENV_NAMES=%CNT_ENV%") else (set "ENV_NAMES=cnt-vfm")
 
 set "CONDA_ROOT="
 if defined CONDA_EXE for %%I in ("%CONDA_EXE%\..\..") do set "CONDA_ROOT=%%~fI"
@@ -28,14 +27,14 @@ for %%N in (%ENV_NAMES%) do (
 )
 if not defined ENV_DIR (
     echo ERROR: no conda environment under "%CONDA_ROOT%\envs" - looked for: %ENV_NAMES%
-    echo Create it as the README describes, or set SEM_ENV to the one you use.
+    echo Create it as the README describes, or set CNT_ENV to the one you use.
     exit /b 1
 )
 
 echo Using %ENV_DIR%
 call "%CONDA_ROOT%\Scripts\activate.bat" "%ENV_DIR%"
 REM Activation can fail without saying so - two launchers started at the same
-REM moment collide on conda's temporary file - and the app then dies further on
+REM moment collide on conda's temporary file - and Python then dies further on
 REM with "Python was not found". So check it took, and try once more if not.
 if /i not "%CONDA_PREFIX%"=="%ENV_DIR%" (
     ping -n 3 127.0.0.1 > nul
@@ -43,8 +42,7 @@ if /i not "%CONDA_PREFIX%"=="%ENV_DIR%" (
 )
 if /i not "%CONDA_PREFIX%"=="%ENV_DIR%" (
     echo ERROR: could not activate "%ENV_DIR%"
-    echo Try again, or activate it yourself in an Anaconda Prompt and run
-    echo "python -m sem_analysis_app" from here.
+    echo Try again, or activate it yourself in an Anaconda Prompt.
     exit /b 1
 )
 

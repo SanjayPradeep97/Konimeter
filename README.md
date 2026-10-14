@@ -12,10 +12,13 @@ The project does two things:
 
 1. **Segmentation and quantification.** An interactive tool built on Meta's
    Segment Anything Model: read the scale bar (OCR or metadata), click on
-   particles to get masks, post-process them, and measure area and equivalent
-   diameter. This is the tool used for Table 1 and to produce every mask in the
-   classification dataset. [`docs/SEGMENTATION_TOOL.md`](docs/SEGMENTATION_TOOL.md)
-   is its manual.
+   particles to get masks, post-process them, and measure them. This is the
+   tool used for Table 1 and to produce every mask in the classification
+   dataset. It is maintained, with its scale-bar reading and measurement, as
+   **Konimeter** on the repository's
+   [`main`](https://github.com/SanjayPradeep97/Konimeter) branch. The images on
+   this branch carry no scale bar, so the demo below uses only its
+   segmentation: SAM, prompted by clicks.
 2. **Classification.** A frozen DINOv2 ViT-B/14 whose hypercolumn features are
    pooled only inside the particle's mask, followed by a small MLP, assigns each
    segmented particle to Fiber, Cluster, Matrix or MatrixSurface. The
@@ -23,20 +26,22 @@ The project does two things:
    the Luo et al. re-implementation and every statistical test are in
    [`classification/`](classification/) and [`baseline/`](baseline/).
 
-A [demo](demo/README.md) joins the two on 60 included micrographs: click on a
-particle, SAM masks it, the classifier labels it. `demo/run_demo.bat` (or
-`.sh`) is the one-command start.
+A [demo](demo/README.md) joins the two on 60 included micrographs: open one,
+SAM makes a first guess at the particle, click to correct it if needed, and the
+classifier labels it. `demo/run_demo.bat` (or `.sh`) is the one-command start;
+the page downloads the SAM ViT-B checkpoint itself the first time.
 
 ## Repository layout
 
-| directory | what it holds |
+| path | what it holds |
 |---|---|
-| `sem_particle_analysis/`, `sem_analysis_app/`, `tests/` | the segmentation library, its Gradio app, and their test suite |
 | `classification/` | protocol, feature extraction, probes, fine-tuned baselines, statistics, figure and table scripts, tests |
 | `baseline/` | the Luo et al. (2021) VGG-16 + VLAD re-implementation and its results |
 | `results/` | the run the paper reports: every configuration's metrics and **per-image predictions**, `analysis.json`, the epoch sweep, regenerated figures |
 | `splits/` | `dataset_splits.pkl`, the 1,785-image partition every number uses, the same as a CSV, and what each split contains |
-| `demo/` | the click-to-classify demonstration, with 60 held-out micrographs, their expert masks and the paper's classifier heads |
+| `demo/` | the segment-and-classify demonstration, with 60 held-out micrographs, their expert masks and the paper's classifier heads |
+| `tests/` | the demo's tests |
+| `download_sam_weights.py` | fetches the SAM ViT-B checkpoint, for the demo and Figure 7 |
 | `reproduce.bat`, `reproduce.sh` | the one-command reproduction (Windows / Linux-macOS) |
 
 ## Install
@@ -46,14 +51,12 @@ git clone -b publication https://github.com/SanjayPradeep97/Konimeter.git
 cd Konimeter
 ```
 
-(The repository's default branch, `main`, holds only the segmentation tool,
-Konimeter, for general use; everything for the paper is on this branch. Until
-October 2026 the repository was called SAM-SEM-Segmentation, and links to that
-name redirect here.)
+(The repository's default branch, `main`, holds the segmentation tool,
+Konimeter, for general use, developed further since the paper was submitted;
+everything for the paper is on this branch. Until October 2026 the repository
+was called SAM-SEM-Segmentation, and links to that name redirect here.)
 
-Two conda environments, one per half of the project.
-
-**Classification pipeline, baseline and demo** (`cnt-vfm`):
+One conda environment, `cnt-vfm`, runs everything on this branch:
 
 ```bash
 conda env create -f environment.yml          # NVIDIA GPU (CUDA 12.8 wheels)
@@ -62,16 +65,27 @@ conda activate cnt-vfm
 python classification/check_env.py
 ```
 
-**Segmentation tool** (`konimeter`): see the install section of
-[`docs/SEGMENTATION_TOOL.md`](docs/SEGMENTATION_TOOL.md). It needs EasyOCR and
-Gradio and is kept separate because EasyOCR pins its own PyTorch.
-
 The CUDA file pins the `+cu128` PyTorch build so an RTX 50-series card works
 (an unpinned `torch` resolves to a CPU-only wheel); the CPU file takes PyTorch,
 torchvision and XGBoost from conda-forge, so that they share one OpenMP runtime
 (from PyPI, the two runtimes crash the Luo baseline on macOS). The demo, the
 statistics, the tables and the tests run on CPU; re-extracting features and
 re-running the benchmark want a GPU.
+
+## Run the demo
+
+```bash
+conda activate cnt-vfm
+./demo/run_demo.sh               # Linux / macOS
+demo\run_demo.bat                # Windows
+```
+
+The page opens at http://127.0.0.1:7861. The first time, press **Download SAM
+ViT-B** (358 MB, saved in `sam_weights/`); DINOv2's weights (330 MB) follow
+automatically. Then choose a micrograph: SAM outlines the particle and the
+classifier labels it, with the expert's label beside it. If the outline is
+wrong, click on the particle, or on the background to leave it out.
+[`demo/README.md`](demo/README.md) has the details and the measured numbers.
 
 ## Data
 
@@ -114,13 +128,12 @@ Feature caches (`Encoder Benchmark/`, about 1.5 GB) and download caches
 (`_cache/`) are created underneath it. Nothing in the code refers to any other
 location; `classification/cnt_paths.py` is the single place paths are resolved.
 
-**Masks.** The 1,785 masks were made with the segmentation tool in this
-repository. The 60 that belong to the demo images are in `demo/masks/`; the
+**Masks.** The 1,785 masks were made with the segmentation tool (Konimeter,
+on `main`). The 60 that belong to the demo images are in `demo/masks/`; the
 full set is distributed with the paper's data archive rather than in this
-branch. Any mask can be regenerated with the tool's Segment & Refine tab
-(`docs/SEGMENTATION_TOOL.md`, "Run the application") or with the demo, which
-makes masks live. The
-classification pipeline refuses to run if a mask is missing, and says so.
+branch. A mask can be made again with the demo, which makes masks live, or
+with Konimeter. The classification pipeline refuses to run if a mask is
+missing, and says so.
 
 The SEM images of Table 1 were acquired under a collaboration that does not
 permit redistribution.
@@ -171,7 +184,7 @@ python classification/verify_manuscript.py
 
 | in the paper | produced by | from |
 |---|---|---|
-| Table 1 (segmentation Dice/IoU, clicks) | the segmentation tool, `sem_particle_analysis/`, on the validation images of the original submission; not regenerated by `reproduce.bat` (the SEM images cannot be redistributed) | |
+| Table 1 (segmentation Dice/IoU, clicks) | the segmentation tool (Konimeter, on `main`), on the validation images of the original submission; not regenerated by `reproduce.bat` (the SEM images cannot be redistributed) | |
 | Table 2 (selected configurations) | `classification/make_tables.py` | `results/results_probes.csv` |
 | Table 3 (baselines and *p* values) | `classification/make_tables.py` | `results/results_probes.csv`, `results/results_finetune.csv`, `results/analysis.json`, `baseline/results/luo_results_*.json` |
 | Figs. 1, 2, 3, 5 (image mosaics, architecture diagram, misclassified examples) | figures from the original submission, assembled by hand or with notebooks that are not part of this branch | |
@@ -222,8 +235,8 @@ goes through: frozen probes, fine-tuned networks and the VLAD baseline alike.
 ## Tests
 
 ```bash
-pytest -m "not slow"                        # segmentation library and apps, under a minute, in the cnt-vfm env
-pytest                                       # + the tests that need SAM weights and EasyOCR (segmentation-tool env)
+pytest -m "not slow"                        # the demo, without model weights, in seconds
+pytest                                       # + the demo with SAM and the classifier on all 60 images (a few minutes)
 cd classification
 python test_protocol.py                      # 42 checks on the protocol (needs one feature cache)
 python mutants.py                            # re-injects 7 audited bugs; all must be caught (needs the same cache)
@@ -232,10 +245,11 @@ python test_cache.py
 python check_data.py                         # is every image and mask of the split present under CNT_BASE?
 ```
 
-The demo has its own checks: `demo/train_demo_head.py` refuses to write heads
-whose test predictions differ from the shipped per-image predictions, and
-`demo/fetch_demo_images.py --download --verify` confirms the shipped PNGs are
-pixel-identical to the Dataverse originals.
+The full `pytest` run checks that the shipped classifier labels all 60 expert
+masks correctly. The demo also has its own checks: `demo/train_demo_head.py`
+refuses to write heads whose test predictions differ from the shipped
+per-image predictions, and `demo/fetch_demo_images.py --download --verify`
+confirms the shipped PNGs are pixel-identical to the Dataverse originals.
 
 ## Citation
 

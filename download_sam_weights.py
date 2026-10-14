@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
 """
-Download SAM Model Weights
+Download Segment Anything (SAM) checkpoints into sam_weights/.
 
-The app offers to download ViT-B itself, on its Setup tab. This script does the
-same from a terminal, for scripts and installers, and fetches the larger models
-too. Weights go to the same place either way: sam_weights/ in this folder, or
-the directory named by SAM_WEIGHTS_DIR.
-
-Available models:
-- ViT-B (vit_b): Fastest, smallest model (358 MB); what the app loads first
-- ViT-L (vit_l): Good balance of quality and speed (1.2 GB)
-- ViT-H (vit_h): Best quality, largest model (2.4 GB)
+The demo app offers to download ViT-B itself, with a button; this script does
+the same from a terminal, and reproduce.bat / reproduce.sh call it for
+Figure 7. Weights go to sam_weights/ in this folder, or to the directory named
+by SAM_WEIGHTS_DIR.
 
     python download_sam_weights.py --model vit_b
     python download_sam_weights.py --model vit_b vit_h
@@ -19,10 +14,80 @@ With no arguments an interactive menu is shown.
 """
 
 import argparse
+import os
 import sys
+import urllib.request
+from pathlib import Path
 
-from sem_particle_analysis.model import weights_dir
-from sem_particle_analysis.weights import MODELS, download
+MODELS = {
+    "vit_b": {
+        "url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
+        "filename": "sam_vit_b_01ec64.pth",
+        "size": "358 MB",
+    },
+    "vit_l": {
+        "url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
+        "filename": "sam_vit_l_0b3195.pth",
+        "size": "1.2 GB",
+    },
+    "vit_h": {
+        "url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth",
+        "filename": "sam_vit_h_4b8939.pth",
+        "size": "2.4 GB",
+    },
+}
+
+
+def weights_dir():
+    """SAM_WEIGHTS_DIR if set, otherwise sam_weights/ beside this script."""
+    if os.environ.get("SAM_WEIGHTS_DIR"):
+        return Path(os.environ["SAM_WEIGHTS_DIR"]).expanduser()
+    return Path(__file__).resolve().parent / "sam_weights"
+
+
+def checkpoint_path(model_type="vit_b"):
+    """Where a checkpoint is, or would be once downloaded."""
+    return weights_dir() / MODELS[model_type]["filename"]
+
+
+def download(model_type="vit_b", directory=None, progress=None):
+    """
+    Download one SAM checkpoint, unless it is already there.
+
+    The file is written as ``<name>.part`` and renamed only once complete, and
+    urllib raises if the server sent less than it announced, so an interrupted
+    download never leaves a truncated checkpoint that later fails to load.
+
+    Args:
+        model_type: 'vit_b', 'vit_l' or 'vit_h'.
+        directory: Where to save it; ``weights_dir()`` if None.
+        progress: Called as ``progress(done_bytes, total_bytes)`` as data
+            arrives; total_bytes is 0 if the server did not say.
+
+    Returns:
+        Path: The checkpoint.
+    """
+    model = MODELS[model_type]
+    directory = Path(directory) if directory is not None else weights_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / model["filename"]
+    if destination.exists():
+        return destination
+
+    partial = destination.with_name(destination.name + ".part")
+
+    def hook(blocks, block_size, total):
+        if progress is not None:
+            done = blocks * block_size
+            progress(min(done, total) if total > 0 else done, max(total, 0))
+
+    try:
+        urllib.request.urlretrieve(model["url"], partial, hook)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    partial.replace(destination)
+    return destination
 
 
 def print_progress(done, total):
@@ -35,9 +100,9 @@ def print_progress(done, total):
 
 def choose_interactively():
     print("\nWhich model(s) would you like to download?")
-    print("  1. ViT-B (fastest, 358 MB; what the app loads first, recommended)")
+    print("  1. ViT-B (358 MB; the one the demo and Figure 7 use, recommended)")
     print("  2. ViT-L (1.2 GB)")
-    print("  3. ViT-H (best quality, 2.4 GB)")
+    print("  3. ViT-H (2.4 GB)")
     print("  4. All models")
     choice = input("\nEnter choice (1-4): ").strip()
     return {"1": ["vit_b"], "2": ["vit_l"], "3": ["vit_h"],
@@ -58,7 +123,7 @@ def main(argv=None):
     failed = []
     for model_type in models:
         model = MODELS[model_type]
-        if (weights_dir() / model["filename"]).exists():
+        if checkpoint_path(model_type).exists():
             print(f"{model['filename']} already exists. Skipping.")
             continue
         print(f"Downloading {model['filename']} ({model['size']})...")
