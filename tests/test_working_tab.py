@@ -83,7 +83,30 @@ class TestTheCandidates:
     def test_nothing_to_offer_says_what_to_do(self, frame):
         frame.segmenter.rank_candidates = lambda *a, **k: []
         gallery, status = segmentation.rerank()
-        assert gallery["value"] == [] and "Add tool" in status
+        assert gallery["value"] == [] and "Choose Add" in status
+
+    def test_nothing_to_offer_starts_an_empty_outline_to_add_to(self, frame):
+        # Small particles on a porous filter: SAM's whole-frame masks separate
+        # nothing. The Add tool then had no analysis to add to and refused
+        # every click, so the image could not be measured at all.
+        frame.segmenter.rank_candidates = lambda *a, **k: []
+        segmentation.rerank()
+        assert frame.analyzer is not None and len(frame.analyzer.regions) == 0
+
+    def test_opening_such_an_image_has_the_add_tool_ready(self, frame):
+        from sem_analysis_app.callbacks import workflow
+
+        segmenter = frame.segmenter
+        segmenter.segment_image = lambda image, multimask_output=True: (segmenter.masks, None)
+        segmenter.rank_candidates = lambda *a, **k: []
+        workflow.auto_process_current_image(progress=no_progress)
+        assert frame.click_mode == "add"
+
+    def test_clear_all_with_nothing_in_use_gives_an_empty_outline(self, frame):
+        from sem_analysis_app.callbacks import refinement
+
+        _viz, _table, status, *_ = refinement.clear_all_particles()
+        assert not status.startswith("❌") and frame.analyzer is not None
 
 
 class TestWhereTheAnalystIs:

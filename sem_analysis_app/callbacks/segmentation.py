@@ -2,6 +2,7 @@
 Processing tab: SAM segmentation and initial particle analysis.
 """
 import gradio as gr
+import numpy as np
 
 from sem_particle_analysis import ParticleAnalyzer
 from ..visualization import (
@@ -39,11 +40,12 @@ def candidate_gallery(selected=None):
         selected: Index of the candidate in use, highlighted; None for none.
     """
     if not state.masks:
-        return gr.update(value=[], selected_index=None)
+        # Hidden rather than shown empty, where it is a placeholder icon.
+        return gr.update(value=[], selected_index=None, visible=False)
     thumbs = candidate_thumbnails(state.cropped_image, state.masks)
     items = [(thumb, "Best" if i == 0 else f"Option {i + 1}")
              for i, thumb in enumerate(thumbs)]
-    return gr.update(value=items, selected_index=selected)
+    return gr.update(value=items, selected_index=selected, visible=True)
 
 
 def _rank_and_show():
@@ -75,9 +77,14 @@ def _rank_and_show():
     if not state.candidates:
         state.masks = None
         state.use_best_pending = False
+        # Nothing to start from, so start from nothing: an empty outline the
+        # Add and Redraw tools can draw into. Without it they had no analysis
+        # to add to, and the image could not be measured at all.
+        if state.analyzer is None:
+            start_blank_analysis()
         return (candidate_gallery(),
-                "SAM found nothing that stands out from the background. Draw the "
-                "particles with the Add tool, or lower Smallest particle.")
+                "SAM found no particles on its own. Choose Add under Correct and "
+                "click each particle.")
 
     state.masks = [c["mask"] for c in state.candidates]
     keep = state.analyzer is not None and state.has_corrections()
@@ -87,6 +94,24 @@ def _rank_and_show():
                 "New candidates. Your corrections are kept; click a candidate to "
                 "start again from it instead.")
     return candidate_gallery(selected=0), ""
+
+
+def start_blank_analysis():
+    """
+    An empty outline of the open frame, for particles to be drawn in by hand.
+
+    Measured exactly as a candidate would be, so particles added to it are
+    cleaned and counted the same way.
+    """
+    conversion = (state.scale_info or {}).get('conversion')
+    state.analyzer = ParticleAnalyzer(conversion_factor=conversion,
+                                      min_size=state.min_particle_size)
+    state.clear_pending_edits()
+    state.mask_history = []
+    state.selected_mask_index = None
+    state.analyzer.analyze_mask(np.zeros(state.cropped_image.shape[:2], dtype=bool),
+                                min_size=state.min_particle_size,
+                                remove_border=True, border_buffer=4)
 
 
 def use_best_candidate(progress=gr.Progress()):

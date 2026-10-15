@@ -128,6 +128,12 @@ class ParticleSegmenter:
         other side is still offered after them: a wrong expectation should cost
         the analyst one click, not leave nothing to choose.
 
+        The size and contrast checks order the candidates too; they never hide
+        one. A candidate that fails them is offered after every one that passes,
+        so the analyst always has SAM's outlines to choose from and correct:
+        on small particles scattered over a porous filter, every candidate
+        failed, and there was nothing to start from at all.
+
         Args:
             image (np.ndarray): The image the masks were generated from.
             masks (np.ndarray, optional): Candidates; defaults to the last set
@@ -141,8 +147,8 @@ class ParticleSegmenter:
 
         Returns:
             list[dict]: Ordered best-first, each with keys ``mask``,
-            ``mask_index``, ``inverted``, ``fraction``, ``contrast``, ``darker``
-            and ``score``.
+            ``mask_index``, ``inverted``, ``fraction``, ``contrast``, ``darker``,
+            ``plausible`` (passed the size and contrast checks) and ``score``.
         """
         if masks is None:
             masks = self.masks
@@ -161,18 +167,13 @@ class ParticleSegmenter:
                 candidate = ~base if inverted else base
                 if exclude is not None:
                     candidate = candidate & ~exclude
-                fraction = float(candidate.mean())
-                if not (self.MIN_FOREGROUND_FRACTION <= fraction
-                        <= self.MAX_FOREGROUND_FRACTION):
-                    continue
                 if not candidate.any() or candidate.all():
-                    continue
+                    continue          # nothing to outline, or nothing outside it
+                fraction = float(candidate.mean())
 
                 inside = grey[candidate].mean()
                 outside = grey[~candidate].mean()
                 difference = outside - inside  # positive when features are darker
-                if abs(difference) < self.MIN_CONTRAST:
-                    continue
 
                 candidates.append({
                     "mask": candidate,
@@ -181,6 +182,9 @@ class ParticleSegmenter:
                     "fraction": fraction,
                     "contrast": float(abs(difference)),
                     "darker": bool(difference > 0),
+                    "plausible": bool(
+                        self.MIN_FOREGROUND_FRACTION <= fraction <= self.MAX_FOREGROUND_FRACTION
+                        and abs(difference) >= self.MIN_CONTRAST),
                     "score": float(self.scores[index]) if self.scores is not None else None,
                 })
 
@@ -188,7 +192,11 @@ class ParticleSegmenter:
             expected = dark_features is None or candidate["darker"] == dark_features
             # A mask and its complement have the same contrast; with nothing else
             # to go on, the smaller side is the likelier to be the particles.
-            return (not expected, -candidate["contrast"], candidate["fraction"])
+            # Among candidates failing the checks, one covering nearly the whole
+            # frame is the least use as a starting point, so it comes last.
+            return (not candidate["plausible"],
+                    candidate["fraction"] > self.MAX_FOREGROUND_FRACTION,
+                    not expected, -candidate["contrast"], candidate["fraction"])
 
         candidates.sort(key=order)
         return candidates[:top_k]

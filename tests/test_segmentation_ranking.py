@@ -133,7 +133,9 @@ class TestPlausibilityFilters:
         nearly_all[90:110, 90:110] = False      # a 1% particle; the rest is 99%
         image[~nearly_all] = BRIGHT
         ranked = segmenter.rank_candidates(image, np.array([nearly_all]))
-        assert len(ranked) == 1 and ranked[0]["inverted"] is True
+        assert ranked[0]["inverted"] is True and ranked[0]["plausible"]
+        # The 99% side is still offered, last, for the analyst to judge.
+        assert len(ranked) == 2 and not ranked[1]["plausible"]
 
     def test_a_large_mask_is_read_as_its_smaller_complement(self, segmenter):
         # 90% foreground is implausible, but its 10% complement is not — and here
@@ -149,18 +151,36 @@ class TestPlausibilityFilters:
         assert ranked[0]["inverted"] is True
         assert ranked[0]["fraction"] == pytest.approx(0.1)
 
-    def test_rejects_a_candidate_covering_almost_nothing(self, segmenter):
+    def test_a_candidate_covering_almost_nothing_fails_the_checks(self, segmenter):
         image = np.full((200, 200, 3), BACKGROUND, dtype=np.uint8)
         speck = np.zeros((200, 200), dtype=bool)
         speck[0:3, 0:3] = True          # 9 px of 40000 -> below MIN fraction
         image[speck] = BRIGHT
-        assert segmenter.rank_candidates(image, np.array([speck])) == []
+        ranked = segmenter.rank_candidates(image, np.array([speck]))
+        assert ranked and not any(c["plausible"] for c in ranked)
 
-    def test_rejects_a_low_contrast_candidate(self, segmenter):
+    def test_a_low_contrast_candidate_fails_the_checks(self, segmenter):
         # Only 3 grey levels above background — below MIN_CONTRAST. Without this
         # a mask over background speckle outranks a real object.
         image, objects = scene(BACKGROUND + 3)
-        assert segmenter.rank_candidates(image, np.array([objects])) == []
+        ranked = segmenter.rank_candidates(image, np.array([objects]))
+        assert ranked and not any(c["plausible"] for c in ranked)
+
+    def test_failing_the_checks_ranks_after_passing_never_hides(self, segmenter):
+        # Small particles on a porous filter: every one of SAM's outlines failed
+        # the checks, and the analyst was offered nothing to start from.
+        image = np.full((200, 200, 3), BACKGROUND, dtype=np.uint8)
+        faint = np.zeros((200, 200), dtype=bool)
+        faint[20:60, 20:60] = True
+        strong = np.zeros((200, 200), dtype=bool)
+        strong[120:160, 120:160] = True
+        image[faint] = BACKGROUND + 3
+        image[strong] = BRIGHT
+        ranked = segmenter.rank_candidates(image, np.array([faint, strong]), top_k=3)
+        assert len(ranked) == 3
+        assert np.array_equal(ranked[0]["mask"], strong) and ranked[0]["plausible"]
+        assert [c["plausible"] for c in ranked] == sorted(
+            (c["plausible"] for c in ranked), reverse=True)
 
     def test_accepts_a_candidate_just_above_the_contrast_floor(self, segmenter):
         image, objects = scene(BACKGROUND + 40)
@@ -215,10 +235,10 @@ class TestExclude:
         assert not (ranked[0]["mask"] & bar).any()
         assert (ranked[0]["mask"] & objects).any()
 
-    def test_excluding_everything_leaves_no_candidate(self, segmenter):
+    def test_nothing_excluded_is_ever_offered(self, segmenter):
         image, objects = scene(BRIGHT)
-        assert segmenter.rank_candidates(image, np.array([objects]),
-                                         exclude=objects) == []
+        ranked = segmenter.rank_candidates(image, np.array([objects]), exclude=objects)
+        assert all(not (c["mask"] & objects).any() for c in ranked)
 
 
 class TestErrors:

@@ -70,9 +70,14 @@ def auto_process_current_image(progress=gr.Progress()):
 
     progress(0.4, desc="Segmenting...")
     try:
-        return segment_with_sam(progress)
+        shown = segment_with_sam(progress)
     except Exception as exc:
         return candidate_gallery(), f"❌ Segmentation error: {exc}"
+    if not state.masks and state.analyzer is not None:
+        # SAM offered nothing, so the particles are added by hand: have the
+        # Add tool ready rather than Remove, which has nothing to remove.
+        state.click_mode = "add"
+    return shown
 
 
 def open_current_image(progress=gr.Progress()):

@@ -209,7 +209,7 @@ class TestARedrawNeverJustDeletes:
         assert len(analyzer.regions) == 2
 
 
-class TestAnAdditionIsHeldToTheSameRules:
+class TestAnAdditionIsMeasuredLikeAnyParticle:
     @pytest.fixture
     def framed(self, app):
         from sem_particle_analysis import region as reg
@@ -219,19 +219,21 @@ class TestAnAdditionIsHeldToTheSameRules:
         analyzer = analyse(app, mask, remove_border=True)
         return app, analyzer
 
-    def test_the_scale_bar_cannot_be_added(self, framed):
+    def test_what_the_analyst_adds_is_not_cut_to_the_analysable_area(self, framed):
+        # The analyst decides what is a particle. The area the app judged
+        # analysable once cut the shadowed faces of particles out of every
+        # addition, and the outline could not be corrected.
         from sem_analysis_app.callbacks.refinement import handle_image_click
         state, analyzer = framed
-        bar = np.zeros((300, 300), dtype=bool)
-        bar[265:275, 210:270] = True
-        state.segmenter = stub_sam(bar)
+        inside_exclusion = np.zeros((300, 300), dtype=bool)
+        inside_exclusion[262:278, 205:275] = True
+        state.segmenter = stub_sam(inside_exclusion)
         state.click_mode = "add"
 
-        _viz, status = handle_image_click(click(240, 270))
+        handle_image_click(click(240, 270))
 
-        assert state.pending_add_masks == []
-        assert state.undo_history == []
-        assert "Nothing to add" in status
+        assert len(state.pending_add_masks) == 1
+        assert state.pending_add_masks[0][265:275, 210:270].all()
 
     def test_an_edge_particle_re_added_measures_the_same(self, framed):
         from sem_analysis_app.callbacks.refinement import (apply_refinement_changes,

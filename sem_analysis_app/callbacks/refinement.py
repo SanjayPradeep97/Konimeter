@@ -22,18 +22,13 @@ def _plural(count, noun):
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
-def _analysable():
-    """The specimen part of the frame; anything drawn outside it is dropped."""
-    return getattr(state, "analysable_region", None)
-
-
 def _nothing_left_reason(raw):
     """Why a mask from SAM contributed nothing once prepared for measurement."""
     if not raw.any():
         return "SAM found nothing there"
     return (f"nothing of it survives the cleanup every particle gets (at least "
-            f"{state.analyzer.min_size} px and 3 px wide, inside the analysable "
-            f"area, clear of the frame-edge strip)")
+            f"{state.analyzer.min_size} px and 3 px wide, clear of the frame-edge "
+            f"strip)")
 
 
 def roi_box(base_mask, points, shape, pad=ROI_PAD_PX):
@@ -95,8 +90,13 @@ def get_current_visualization():
 def handle_image_click(evt: gr.SelectData):
     """Handle clicks on particle visualization for all refinement modes."""
     try:
+        if state.analyzer is None and state.cropped_image is not None:
+            # No candidate in use yet: draw onto an empty outline instead of
+            # refusing the click.
+            from .segmentation import start_blank_analysis
+            start_blank_analysis()
         if state.analyzer is None:
-            return get_current_visualization(), "❌ No analysis available"
+            return get_current_visualization(), "Open an image first."
 
         # The view may be an enlarged copy of the frame (visualization.for_display).
         factor = display_factor(state.cropped_image.shape)
@@ -153,11 +153,11 @@ def handle_image_click(evt: gr.SelectData):
                     image_already_encoded=True
                 )
 
-                # Queued as it will be measured: restricted to the specimen and
-                # cleaned like every other particle. SAM is happy to segment a
-                # burned-in scale bar, and that must not become a particle.
-                added = state.analyzer.prepare_addition(refined_mask,
-                                                        region=_analysable())
+                # Queued as it will be measured: cleaned like every other
+                # particle. Not cut to the area the app judged analysable: what
+                # the analyst clicks on is theirs to measure, and that judgement
+                # had cut the shadowed faces of particles away.
+                added = state.analyzer.prepare_addition(refined_mask)
                 if not added.any():
                     return (get_current_visualization(),
                             f"⚠️ Nothing to add here — "
@@ -281,8 +281,7 @@ def handle_image_click(evt: gr.SelectData):
                 raw = refined_mask
                 refined_mask = state.analyzer.prepare_addition(
                     refined_mask,
-                    largest_only=state.point_refine_particle is not None,
-                    region=_analysable())
+                    largest_only=state.point_refine_particle is not None)
 
                 if not refined_mask.any():
                     # Do not store an empty preview: there is nothing to apply.
@@ -455,7 +454,7 @@ def apply_refinement_changes(progress=gr.Progress()):
             progress(0.4, desc=f"Adding {_plural(len(state.pending_add_masks), 'particle')}...")
             added = 0
             for add_mask in state.pending_add_masks:
-                pixels = state.analyzer.prepare_addition(add_mask, region=_analysable())
+                pixels = state.analyzer.prepare_addition(add_mask)
                 if pixels.any():
                     state.analyzer.add_particle_from_sam(pixels)
                     added += 1
@@ -508,7 +507,7 @@ def apply_refinement_changes(progress=gr.Progress()):
             # SAM's mask often has stray disconnected blobs, and unioning those
             # in turns a single refinement into several new particles.
             replacement = state.analyzer.prepare_addition(
-                preview, largest_only=refining_existing, region=_analysable())
+                preview, largest_only=refining_existing)
             points = _plural(len(state.point_refine_points), 'point')
             if not preview.any():
                 status_messages.append(
@@ -736,8 +735,11 @@ def clear_edge_particles(buffer_size):
 def clear_all_particles():
     """Clear ALL particles from the mask, giving user a blank canvas to add particles manually."""
     try:
+        if state.analyzer is None and state.cropped_image is not None:
+            from .segmentation import start_blank_analysis
+            start_blank_analysis()
         if state.analyzer is None:
-            return gr.update(), gr.update(), "❌ No analysis available", gr.update(), gr.update()
+            return gr.update(), gr.update(), "Open an image first.", gr.update(), gr.update()
 
         # Get all current labels and delete them all
         all_labels = [r.label for r in state.analyzer.regions]
